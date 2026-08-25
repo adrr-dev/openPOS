@@ -13,7 +13,7 @@ import (
 	"time"
 	_ "time/tzdata" // zona waktu ter-embed (dashboard/laporan per toko)
 
-	router "github.com/0xMinomus/openPOS/backend/internal/router"
+	router "github.com/0xMinomus/openPOS/backend/router"
 )
 
 func main() {

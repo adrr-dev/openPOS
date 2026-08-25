@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/0xMinomus/openPOS/backend/internal/model"
-	"github.com/0xMinomus/openPOS/backend/internal/repo"
+	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/0xMinomus/openPOS/backend/repo"
 )
 
 var (

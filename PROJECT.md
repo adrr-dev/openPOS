@@ -28,16 +28,14 @@ Arsitektur tradisional — **frontend → backend (REST) → PostgreSQL (Supabas
 
 ```
 backend/
-├── cmd/api/main.go          entrypoint: router, CORS, graceful shutdown
-├── internal/
-│   ├── config/              env loader (.env didukung via godotenv)
-│   ├── db/                  koneksi pool + runner migrasi embedded
-│   ├── model/               struct User/Store/TokenPair
-│   ├── repo/                query SQL (users, refresh_tokens)
-│   ├── service/             logika auth (bcrypt, JWT)
-│   ├── handler/             HTTP handler (auth, health)
-│   └── middleware/          Bearer auth, RequireRole (siap untuk RBAC modul berikutnya)
-├── migrations/              001_init.sql (stores, users, refresh_tokens) + embed.go
+├── api/index.go             entry point Vercel serverless (package handler)
+├── cmd/api/main.go          entrypoint server jangka panjang (lokal/VPS)
+├── config/ db/ handler/ middleware/ model/
+│   repo/ router/ service/   ← dipisah dari internal/ agar bisa
+│                              di-import runtime Go Vercel (builder menyalin
+│                              file handler keluar modul, aturan internal/
+│                              Go melarang import tersebut)
+├── migrations/              SQL migrasi embedded + embed.go
 ├── .env.example
 └── PROJECT.md / EXPECTED.md
 ```

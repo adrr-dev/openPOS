@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/0xMinomus/openPOS/backend/internal/model"
+	"github.com/0xMinomus/openPOS/backend/model"
 )
 
 type MovementFilter struct {

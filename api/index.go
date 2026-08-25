@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	router "github.com/0xMinomus/openPOS/backend/internal/router"
+	router "github.com/0xMinomus/openPOS/backend/router"
 )
 
 var h http.Handler

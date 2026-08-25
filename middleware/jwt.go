@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/0xMinomus/openPOS/backend/internal/service"
+	"github.com/0xMinomus/openPOS/backend/service"
 )
 
 type ctxKey string

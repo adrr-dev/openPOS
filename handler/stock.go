@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/0xMinomus/openPOS/backend/internal/middleware"
-	"github.com/0xMinomus/openPOS/backend/internal/repo"
-	"github.com/0xMinomus/openPOS/backend/internal/service"
+	"github.com/0xMinomus/openPOS/backend/middleware"
+	"github.com/0xMinomus/openPOS/backend/repo"
+	"github.com/0xMinomus/openPOS/backend/service"
 )
 
 type StockHandler struct {

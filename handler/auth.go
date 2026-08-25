@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/0xMinomus/openPOS/backend/internal/middleware"
-	"github.com/0xMinomus/openPOS/backend/internal/model"
-	"github.com/0xMinomus/openPOS/backend/internal/service"
+	"github.com/0xMinomus/openPOS/backend/middleware"
+	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/0xMinomus/openPOS/backend/service"
 )
 
 type AuthHandler struct {

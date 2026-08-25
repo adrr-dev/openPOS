@@ -14,13 +14,13 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/0xMinomus/openPOS/backend/internal/config"
-	"github.com/0xMinomus/openPOS/backend/internal/db"
-	"github.com/0xMinomus/openPOS/backend/internal/handler"
-	"github.com/0xMinomus/openPOS/backend/internal/middleware"
-	"github.com/0xMinomus/openPOS/backend/internal/model"
-	"github.com/0xMinomus/openPOS/backend/internal/repo"
-	"github.com/0xMinomus/openPOS/backend/internal/service"
+	"github.com/0xMinomus/openPOS/backend/config"
+	"github.com/0xMinomus/openPOS/backend/db"
+	"github.com/0xMinomus/openPOS/backend/handler"
+	"github.com/0xMinomus/openPOS/backend/middleware"
+	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/0xMinomus/openPOS/backend/repo"
+	"github.com/0xMinomus/openPOS/backend/service"
 )
 
 // Server adalah hasil penyusunan aplikasi.
