@@ -15,20 +15,30 @@ import (
 	router "github.com/0xMinomus/openPOS/backend/router"
 )
 
-var h http.Handler
+var (
+	h       http.Handler
+	initErr error // disimpan alih-alih panic, agar penyebabnya tampil di respons
+)
 
 func init() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	srv, err := router.New(ctx)
 	if err != nil {
-		panic(err)
+		initErr = err
+		return
 	}
 	h = srv.Handler
 }
 
 // Handler adalah pintu masuk yang dipanggil runtime Go Vercel.
 func Handler(w http.ResponseWriter, r *http.Request) {
+	if initErr != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("INIT ERROR: " + initErr.Error() + "\n"))
+		return
+	}
 	// chi kita ter-mount di /api/v1 — pastikan prefix ada
 	if !strings.HasPrefix(r.URL.Path, "/api") {
 		r.URL.Path = "/api" + r.URL.Path
