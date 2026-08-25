@@ -3,11 +3,30 @@
 > File ini untuk **tim frontend**. Berisi daftar perubahan yang diharapkan agar aplikasi web
 > memakai API backend alih-alih hardcoded/localStorage. Centang ✔ berarti sudah dikerjakan.
 
+## HANDOFF — Deploy Frontend (Vercel)
+
+| Item | Nilai |
+|---|---|
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+| Node | 22.x |
+| Env `VITE_API_URL` | `https://openpos-api.vercel.app/api/v1` |
+
+Tambahkan `vercel.json` di root repo frontend:
+```json
+{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
+```
+
+Backend produksi sudah live & teruji: <https://openpos-api.vercel.app/api/v1/health>
+Kontrak endpoint lengkap: [`PROJECT.md`](./PROJECT.md). Setelah frontend online, kirim URL-nya
+ke tim backend agar domainnya ditambahkan ke `CORS_ORIGINS` (saat ini backend hanya mengizinkan
+localhost — tanpa itu browser akan memblokir request API dari produksi).
+
 ## Aturan main integrasi
 
 1. **Base URL API** dibaca dari env, jangan hardcode:
    - Dev: `/api/v1` (di-proxy Vite ke `http://localhost:8080`, lihat `vite.config.ts`)
-   - Prod: set `VITE_API_URL=https://<url-backend-resmi>/api/v1` di `.env` saat deploy (URL resmi menyusul dari tim backend)
+   - Prod: set `VITE_API_URL=https://openpos-api.vercel.app/api/v1` di Environment Variables Vercel frontend (URL resmi backend produksi — final)
 2. Kontrak lengkap tiap endpoint ada di [`PROJECT.md`](./PROJECT.md).
 3. Error dari server memakai pesan Indonesia siap-tampil — langsung tampilkan ke pengguna.
 4. Access token kedaluwarsa (default 15 menit) → `apiFetch` otomatis mencoba `POST /auth/refresh` sekali lalu mengulang request. Jika refresh gagal → anggap sesi habis (arahkan ke `/masuk`).
