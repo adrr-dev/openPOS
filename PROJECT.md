@@ -51,6 +51,28 @@ go run ./cmd/api          # default http://localhost:8080
 
 Migrasi skema dijalankan otomatis saat startup (tabel `schema_migrations` melacak versi).
 
+### Makefile
+
+| Target | Fungsi |
+|---|---|
+| `make install` | `go mod tidy` |
+| `make run` | server dev (baca `.env`) |
+| `make build` | compile → `bin/openpos-api` |
+| `make start` | build + jalan |
+| `make check` | vet + build semua paket |
+| `make test` | semua test (muat `.env`, termasuk tes entrypoint Vercel) |
+
+### Deploy ke Vercel (Go serverless)
+
+File pendukung sudah ada: `api/index.go` (entrypoint `Handler`) · `vercel.json` (rewrites semua URL → fungsi) · `api/index_test.go` (smoke test).
+
+1. Import repo ini di Vercel (Framework Preset: **Other**).
+2. Build Command & Output Directory: **biarkan kosong** (`@vercel/go` yang meng-compile).
+3. Environment Variables: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS=https://<domain-frontend>`.
+4. Deploy → verifikasi `curl https://<project>.vercel.app/api/v1/health`.
+
+Catatan: cold start instansi baru menjalankan migrasi idempotent; pool DB bertahan antar request hangat.
+
 ### Utility `cmd/hashpw`
 Membuat bcrypt hash untuk insert akun manual via Supabase Dashboard:
 ```bash

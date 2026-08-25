@@ -1,5 +1,4 @@
 .env
 *.exe
-/api
 bin/
 tmp/
