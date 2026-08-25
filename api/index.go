@@ -3,7 +3,8 @@
 // sekali per instansi hangat lalu dipakai ulang antar-request.
 //
 // Routing semua URL ke fungsi ini diatur oleh vercel.json (rewrites).
-package main
+// Catatan: runtime @vercel/go mewajibkan paket bernama "handler".
+package handler
 
 import (
 	"context"
@@ -34,7 +35,3 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ServeHTTP(w, r)
 }
-
-// main tidak pernah dipanggil oleh Vercel; ada hanya agar `go build ./...`
-// dan tooling Go standar tetap puas terhadap paket main ini.
-func main() {}
