@@ -25,7 +25,7 @@ func (r *CategoryRepo) ListByStore(ctx context.Context, storeID string) ([]*mode
 	}
 	defer rows.Close()
 
-	var out []*model.Category
+	out := make([]*model.Category, 0)
 	for rows.Next() {
 		var c model.Category
 		if err := rows.Scan(&c.ID, &c.StoreID, &c.Name, &c.Active, &c.CreatedAt); err != nil {
