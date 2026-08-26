@@ -11,14 +11,15 @@ Arsitektur tradisional — **frontend → backend (REST) → PostgreSQL (Supabas
 ## Status
 
 - **Fase:** MVP Backend SELESAI ✅ — seluruh modul P0 terimplementasi & teruji
+- **Produksi:** <https://openpos-api.vercel.app/api/v1> (Vercel, live)
 - **Arsitektur:** frontend → backend REST (Go/chi) → PostgreSQL (Supabase)
-- **Frontend:** seluruh halaman inti (auth, users, produk, stok, POS, transaksi) memakai API; Dashboard/Laporan/Pengaturan menyusul penyempurnaan agregat bila dibutuhkan
+- **Frontend:** seluruh halaman (auth, users, produk, stok, POS, transaksi, dashboard, laporan, pengaturan) memakai API ini
 
 ## Teknologi
 
 | Bagian | Pilihan |
 |---|---|
-| Bahasa | Go 1.27 |
+| Bahasa | Go (`go.mod` directive 1.24; dikembangkan dengan 1.27) |
 | Router | [chi v5](https://github.com/go-chi/chi) (+ cors) |
 | DB driver | [pgx/v5](https://github.com/jackc/pgx) (pool, **`QueryExecModeSimpleProtocol` dipaksa di kode** agar kompatibel transaction pooler Supabase/PgBouncer) |
 | Auth | JWT HS256 access token + refresh token (rotasi, hash SHA-256 di DB) |
@@ -42,9 +43,19 @@ backend/
 
 ## Menjalankan
 
+Dua jalur sesuai kebutuhan:
+
+**A. Konsumsi API saja (pengembang frontend)** — tidak perlu apa-apa:
+```
+https://openpos-api.vercel.app/api/v1        ← base URL produksi, live 24/7
+```
+
+**B. Mengembangkan backend lokal** — butuh rahasia koneksi (DATABASE_URL & JWT_SECRET riil);
+struktur variabel ada di `.env.example`, nilai riil **minta langsung ke maintainer**:
+
 ```bash
-cp .env.example .env      # isi DATABASE_URL (Supabase pooler) & JWT_SECRET
-go run ./cmd/api          # default http://localhost:8080
+cp .env.example .env      # isi nilai riil
+go run ./cmd/api          # default http://localhost:8080/api/v1
 ```
 
 Migrasi skema dijalankan otomatis saat startup (tabel `schema_migrations` melacak versi).
@@ -62,12 +73,14 @@ Migrasi skema dijalankan otomatis saat startup (tabel `schema_migrations` melaca
 
 ### Deploy ke Vercel (Go serverless)
 
-File pendukung sudah ada: `api/index.go` (entrypoint `Handler`) · `vercel.json` (rewrites semua URL → fungsi) · `api/index_test.go` (smoke test).
+**Produksi aktif:** <https://openpos-api.vercel.app/api/v1>
 
-1. Import repo ini di Vercel (Framework Preset: **Other**).
-2. Build Command & Output Directory: **biarkan kosong** (`@vercel/go` yang meng-compile).
-3. Environment Variables: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS=https://<domain-frontend>`.
-4. Deploy → verifikasi `curl https://<project>.vercel.app/api/v1/health`.
+File pendukung: `api/index.go` (entrypoint `Handler`, `package handler` — persyaratan runtime `@vercel/go`) · `vercel.json` (rewrites semua URL → fungsi) · smoke test di `router_test.go`.
+
+1. Import repo ini di Vercel (Framework Preset: **Other**; Build Command & Output Directory kosong).
+2. Environment Variables (di-set lewat Dashboard — file `.env` repo **tidak** ikut ter-deploy):
+   `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS=https://<domain-frontend>`.
+3. Deploy → verifikasi `curl https://openpos-api.vercel.app/api/v1/health`.
 
 Catatan: cold start instansi baru menjalankan migrasi idempotent; pool DB bertahan antar request hangat.
 
@@ -81,12 +94,15 @@ go run ./cmd/hashpw kata-sandi-anda   # output: $2a$10$… → tempel ke kolom p
 
 | Variabel | Wajib | Default | Keterangan |
 |---|---|---|---|
-| `PORT` | tidak | `8080` | port HTTP |
+| `PORT` | tidak | `8080` | port HTTP lokal (diabaikan Vercel) |
 | `DATABASE_URL` | **ya** | — | connection string Postgres (Supabase: pakai pooler port `6543`) |
 | `JWT_SECRET` | **ya** | — | secret HS256 (`openssl rand -hex 32`) |
 | `ACCESS_TTL_MINUTES` | tidak | `15` | umur access token |
 | `REFRESH_TTL_DAYS` | tidak | `7` | umur refresh token |
-| `CORS_ORIGINS` | tidak | `http://localhost:5173` | origin frontend, dipisah koma. URL produksi (Vercel) ditambahkan di sini nanti |
+| `CORS_ORIGINS` | tidak | `http://localhost:5173` | origin frontend, dipisah koma — produksi memuat domain frontend |
+
+Di Vercel: variabel di-set via Dashboard → Settings → Environment Variables (scope Production);
+file `.env` lokal tidak ikut ter-deploy. Setiap perubahan env wajib diikuti **Redeploy**.
 
 ---
 

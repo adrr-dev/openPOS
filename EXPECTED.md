@@ -18,6 +18,7 @@ Tambahkan `vercel.json` di root repo frontend:
 ```
 
 Backend produksi sudah live & teruji: <https://openpos-api.vercel.app/api/v1/health>
+**Menjalankan backend lokal tidak diperlukan** untuk mengembangkan frontend.
 Kontrak endpoint lengkap: [`PROJECT.md`](./PROJECT.md). Setelah frontend online, kirim URL-nya
 ke tim backend agar domainnya ditambahkan ke `CORS_ORIGINS` (saat ini backend hanya mengizinkan
 localhost — tanpa itu browser akan memblokir request API dari produksi).
