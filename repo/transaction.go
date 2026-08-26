@@ -161,7 +161,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 
 	var seq int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM transactions WHERE store_id = $1`, in.StoreID,
+		`SELECT COALESCE(MAX(seq), 0) + 1 FROM transactions`,
 	).Scan(&seq); err != nil {
 		return nil, err
 	}
