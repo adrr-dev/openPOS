@@ -34,6 +34,47 @@ Halaman yang **tidak perlu diubah struktur visualnya**: semuanya. Yang berubah h
 
 ---
 
+## File yang diedit — basis bersih → hasil integrasi
+
+Dua opsi pengerjaan. **Rekomendasi: Opsi A** bila ingin cepat & hasil identik dengan yang sudah teruji;
+**Opsi B** bila ingin memahami dan menulis sendiri setiap perubahan.
+
+### Opsi A — Salin file jadi dari fork integrasi (Adrr)
+
+Timpa file-file berikut pada repo bersih Anda (path relatif terhadap `web/`), lalu set env:
+
+```
+src/lib/api.ts        ← FILE BARU (fondasi semua request)
+src/lib/store.ts      ← auth via API + hapus seed demo/loginAs
+vite.config.ts        ← tambah proxy dev /api → localhost:8080
+src/pages/Masuk.tsx       src/pages/Users.tsx
+src/pages/Daftar.tsx      src/pages/Produk.tsx
+src/pages/AppShell.tsx    src/pages/Stok.tsx
+src/pages/Pos.tsx         src/pages/Transaksi.tsx
+src/pages/Dashboard.tsx   src/pages/Laporan.tsx
+                          src/pages/Pengaturan.tsx
+```
+
+Tidak tersentuh: `Landing`, `Navbar`, `components/ui/*`, `hooks`, `index.css`, `App.tsx`.
+Sumber salinan: minta arsip/repo fork integrasi ke Adrr.
+
+### Opsi B — Edit manual dari basis bersih
+
+Ikuti **Langkah 1 → 5g** di bawah secara berurutan. Perkiraan bobot per file agar bisa dibagi tugas:
+
+| Bobot | File |
+|---|---|
+| Besar | `lib/api.ts` (baru) · `Pos.tsx` · `Transaksi.tsx` · `Produk.tsx` · `store.ts` |
+| Sedang | `Stok.tsx` · `Dashboard.tsx` · `Laporan.tsx` · `Pengaturan.tsx` · `Users.tsx` |
+| Ringan | `Masuk.tsx` · `Daftar.tsx` · `AppShell.tsx` · `vite.config.ts` |
+
+### `vercel.json` frontend — sudah beres di repo bersih ✅
+
+Isinya sudah tepat (`framework: vite`, build `npm run build`, output `dist`, rewrites SPA).
+Cukup tambah Environment Variable `VITE_API_URL=https://openpos-api.vercel.app/api/v1`.
+
+---
+
 ## Langkah 1 — Buat `src/lib/api.ts` (FILE BARU — fondasi seluruh integrasi)
 
 Satu file yang menangani: base URL, penyimpanan token, auto-refresh, dan semua helper endpoint.
