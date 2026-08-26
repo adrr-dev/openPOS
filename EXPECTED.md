@@ -1,86 +1,154 @@
-# EXPECTED.md — Yang Harus Diubah Frontend
+# EXPECTED.md — Panduan Integrasi Frontend ↔ API OpenPOS
 
-> File ini untuk **tim frontend**. Berisi daftar perubahan yang diharapkan agar aplikasi web
-> memakai API backend alih-alih hardcoded/localStorage. Centang ✔ berarti sudah dikerjakan.
+> Untuk pemegang **repo frontend bersih**: <https://github.com/0xMinomus/openPOS>
+> (versi localStorage — `store.ts`, seed `admin/123`, semua halaman baca `db.*`).
+> Tujuan dokumen ini: daftar **perubahan yang harus Anda edit** agar aplikasi bekerja
+> dengan API backend, tanpa menjalankan backend lokal sama sekali.
 
-## HANDOFF — Deploy Frontend (Vercel)
+---
+
+## 0. Informasi dasar
 
 | Item | Nilai |
 |---|---|
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
-| Node | 22.x |
-| Env `VITE_API_URL` | `https://openpos-api.vercel.app/api/v1` |
+| Base URL API (produksi) | `https://openpos-api.vercel.app/api/v1` |
+| Health check | `GET /health` → `{"database":"up",...}` |
+| Kontrak lengkap endpoint | [`PROJECT.md`](./PROJECT.md) |
+| Menjalankan backend lokal | **Tidak diperlukan** untuk mengembangkan frontend |
 
-Tambahkan `vercel.json` di root repo frontend:
-```json
-{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
-```
+Aturan main:
+1. Base URL dibaca dari env: `VITE_API_URL` (prod) — jangan hardcode.
+2. Semua error server berupa JSON `{ "error": "pesan Indonesia siap-tampil" }` → langsung tampilkan.
+3. Access token kedaluwarsa (15 menit) → tangani lewat auto-refresh (lihat Langkah 1).
 
-Backend produksi sudah live & teruji: <https://openpos-api.vercel.app/api/v1/health>
-**Menjalankan backend lokal tidak diperlukan** untuk mengembangkan frontend.
-Kontrak endpoint lengkap: [`PROJECT.md`](./PROJECT.md). Setelah frontend online, kirim URL-nya
-ke tim backend agar domainnya ditambahkan ke `CORS_ORIGINS` (saat ini backend hanya mengizinkan
-localhost — tanpa itu browser akan memblokir request API dari produksi).
+## Peta besar: apa yang berubah
 
-## Aturan main integrasi
-
-1. **Base URL API** dibaca dari env, jangan hardcode:
-   - Dev: `/api/v1` (di-proxy Vite ke `http://localhost:8080`, lihat `vite.config.ts`)
-   - Prod: set `VITE_API_URL=https://openpos-api.vercel.app/api/v1` di Environment Variables Vercel frontend (URL resmi backend produksi — final)
-2. Kontrak lengkap tiap endpoint ada di [`PROJECT.md`](./PROJECT.md).
-3. Error dari server memakai pesan Indonesia siap-tampil — langsung tampilkan ke pengguna.
-4. Access token kedaluwarsa (default 15 menit) → `apiFetch` otomatis mencoba `POST /auth/refresh` sekali lalu mengulang request. Jika refresh gagal → anggap sesi habis (arahkan ke `/masuk`).
-
-## Status integrasi halaman
-
-| Halaman | Sumber data | Status |
+| Sisi | Sebelum (repo bersih) | Sesudah integrasi |
 |---|---|---|
-| Masuk / Daftar | API auth | ✅ |
-| User Management | API `/users` | ✅ |
-| Produk | API katalog | ✅ |
-| Stok | API stok/movement | ✅ |
-| POS Kasir | API katalog + checkout + settings struk | ✅ |
-| Transaksi | API transaksi/refund | ✅ |
-| Dashboard | API `/dashboard` (role-aware) | ✅ |
-| Laporan | API `/reports?period=` | ✅ |
-| Pengaturan | API `/settings` + `/users/{id}/passcode` | ✅ |
+| Autentikasi | `store.ts` cek password lokal, seed `admin/123` | `POST /auth/login|register`, JWT + refresh token |
+| Data bisnis | array di `localStorage` (`op_db_v1`) | endpoint REST (produk, stok, transaksi, users, laporan) |
+| RBAC | disembunyikan di menu | **ditegakkan server** (kasir → 403) |
+| Ganti akun cepat | `loginAs()` tanpa sandi | dihapus — logout + login penuh |
 
-**Seluruh halaman kini memakai API — tidak ada lagi data bisnis di localStorage.**
+Halaman yang **tidak perlu diubah struktur visualnya**: semuanya. Yang berubah hanya *sumber datanya*.
 
-## Fase 6 — Dashboard, Laporan, Settings ✅ (selesai)
+---
 
-`GET/PUT /settings` · `PUT /users/{id}/passcode` · `GET /dashboard` (role-aware, zona waktu toko) · `GET /reports?period=today|yesterday|week|month|all` 🔒 admin. Kontrak lengkap di [`PROJECT.md`](./PROJECT.md).
+## Langkah 1 — Buat `src/lib/api.ts` (FILE BARU — fondasi seluruh integrasi)
 
-- [x] *(backend)* Settings CRUD + passcode (bcrypt) + dashboard agregat + report komposit
-- [x] *(frontend)* `api.ts`: settings/passcode/dashboard/report helpers
-- [x] *(frontend)* `Dashboard.tsx`: KPI, grafik 7 hari, metode bayar, top produk, recent; kasir = ringkasan shift
-- [x] *(frontend)* `Laporan.tsx`: 5 periode × 4 tab dari satu respons, export CSV per tab
-- [x] *(frontend)* `Pengaturan.tsx`: profil toko, struk, pajak via `PUT /settings`; passcode per akun via API
-- [x] *(frontend)* `Pos.tsx`: struk membaca header/footer/paper/nama toko dari `GET /settings`
+Satu file yang menangani: base URL, penyimpanan token, auto-refresh, dan semua helper endpoint.
 
-## Fase 1 — Auth ✅
+Tanggung jawab wajib:
+- `BASE = import.meta.env.VITE_API_URL ?? '/api/v1'`
+- Token disimpan di `localStorage`: kunci `op_access` & `op_refresh`
+- Setiap request auth menyertakan header `Authorization: Bearer <access>`; bila respon 401
+  → panggil `POST /auth/refresh` **sekali**, simpan pasangan token baru, ulangi request;
+  gagal → sesi habis (arahkan ke `/masuk`)
+- Error dilempar sebagai `ApiError extends Error` dengan `{ status, message, code }`;
+  `code = 'passcode_required'` bila pesan server persis `"passcode_required"`
 
-`POST /auth/register|login|refresh|logout` · `GET /auth/me`. Alur passcode dua-langkah via error `passcode_required`. Seed akun demo lokal dihapus; storage key naik `op_db_v2`.
+Daftar helper yang dipakai halaman-halaman (method · path):
 
-## Fase 2 — Users ✅
+| Helper | HTTP | Dipakai halaman |
+|---|---|---|
+| `apiLogin(email,password,passcode?)` | POST `/auth/login` | Masuk |
+| `apiRegister(name,email,password,storeName)` | POST `/auth/register` | Daftar |
+| `apiLogout()` | POST `/auth/logout` | AppShell |
+| `apiMe()` | GET `/auth/me` | bootstrap sesi |
+| `apiListUsers / apiCreateUser / apiSetUserActive` | GET/POST `/users`, PATCH `/users/{id}/active` | Users |
+| `apiListCategories / apiCreateCategory / apiDeleteCategory` | `/categories` | Produk |
+| `apiListProducts({q,categoryId,active,page,limit}) / apiCreateProduct / apiUpdateProduct / apiSetProductActive` | `/products…` | Produk, Stok, Pos |
+| `apiListMovements({type,productId,page}) / apiAdjustStock(productId,direction,qty,reason)` | `/movements`, `/stock/adjustments` | Stok |
+| `apiCheckout({items:[{productId,qty}],discount,method,paid})` | POST `/transactions` | Pos |
+| `apiListTransactions({q,method,date,page}) / apiRefundTransaction(id,items,reason)` | `/transactions…` | Transaksi |
+| `apiGetSettings / apiUpdateSettings / apiSetPasscode(userId,passcode)` | `/settings`, `/users/{id}/passcode` | Pengaturan |
+| `apiGetDashboard()` · `apiGetReport(period)` | `/dashboard`, `/reports?period=` | Dashboard, Laporan |
 
-`GET /users` · `POST /users` · `PATCH /users/{id}/active` 🔒 admin. `Users.tsx` memakai API penuh. Sisa: bagian passcode di Pengaturan (menyusul).
+Bentuk data penting (snake_case dari server):
+- Produk: `{ id, category_id, category_name, name, sku, barcode, buy_price, sell_price, stock, unit, active }`
+- Kategori: `{ id, name, active }`
+- Transaksi: `{ id:"TRX-0001", seq, cashier_name, items:[{product_id,name,buy_price,price,qty}], subtotal, discount, tax, total, method, paid, change, status, time }`
+- Movement: `{ id, product_id, product_name, type:"sale|refund|adjust|initial", qty(±), reason, actor, created_at }`
 
-## Fase 3 — Katalog: Produk & Kategori ✅
+> Implementasi lengkap `api.ts` (±300 baris) sudah jadi — **minta filenya ke tim backend**
+> atau salin dari folder `frontend/web/src/lib/api.ts` pada fork integrasi. Dokumen ini cukup
+> untuk memahami & mereplikasi manual.
 
-`GET/POST /categories`, `DELETE /categories/{id}` (soft bila dipakai), `GET /products` (+filter q/active/page/limit), `POST/PUT/PATCH /products…` (SKU unik per toko; PUT tak menyentuh stok). `Produk.tsx` via API penuh termasuk import/export CSV.
+## Langkah 2 — Proxy dev (`vite.config.ts`)
 
-## Fase 4 — Stok & Movement ✅
+```ts
+server: { proxy: { '/api': 'http://localhost:8080' } }
+```
+Hanya untuk pengembangan. Produksi memakai `VITE_API_URL` penuh.
 
-`GET /movements?type=&productId=&page=` · `POST /stock/adjustments` 🔒 admin (alasan wajib, dilarang negatif, atomik; produk berstok awal dapat movement `initial`). `Stok.tsx` via API penuh.
+## Langkah 3 — `src/lib/store.ts` (auth pindah ke server)
 
-## Fase 5 — Transaksi & Refund ✅
+| Fungsi lama | Ubah menjadi |
+|---|---|
+| `login()` sinkron cek `db.accounts` | **async** → `POST /auth/login`; sukses tulis `db.session` + token tersimpan oleh `api.ts`; error dilempar (kode `passcode_required` = tampilkan form passcode, ulangi dengan argumen `passcode`) |
+| `register()` tulis akun lokal | async → `POST /auth/register`; cukup set `session` + `settings.storeName` lokal; **jangan** menyalin akun ke `db.accounts` |
+| `logout()` | async → `POST /auth/logout` (best-effort) + hapus token + `session=null` |
+| `loginAs()` | **HAPUS** (ganti akun tanpa sandi tidak diizinkan backend) |
 
-`POST /transactions` (checkout dihitung server: harga dari DB, pajak dari settings toko, advisory-lock per toko, snapshot item), `GET /transactions?q=&method=&date=` (kasir terbatas miliknya), `GET /transactions/{id}`, `POST /transactions/{id}/refund` 🔒 admin (parsial/penuh; dobel refund ditolak EC-004).
+Tambah/perbaiki:
+- Hapus seed akun demo (`admin/123`) dari `seed()` dan blok re-add di `load()`; kunci storage naik ke `op_db_v2`.
+- Saat `load()`: paksa `db.accounts = {}` (cermin akun lama membuat halaman Users tampil salah).
+- Bootstrap: jika token ada tapi `db.session` kosong → `GET /auth/me` untuk hidrasi; gagal → hapus token.
 
-- [x] *(backend)* Migrasi 005: transactions, transaction_items (snapshot), refunds (JSONB), kolom settings di stores
-- [x] *(frontend)* `api.ts`: `apiCheckout` / `apiListTransactions` / `apiRefundTransaction`
-- [x] *(frontend)* `Pos.tsx`: katalog dari API, stok efektif dikurangi isi keranjang, struk dari respons server
-- [x] *(frontend)* `Transaksi.tsx`: list server-side + filter q/method/date, detail dari data list, refund admin via API
-- [ ] *(frontend)* `Dashboard.tsx`, `Laporan.tsx`, `Pengaturan.tsx` — menyusul modul #6
+## Langkah 4 — Halaman auth
+
+- `Masuk.tsx`: hapus semua pengecekan `db.accounts[...]` (validasi kepemilikan akun = tugas server);
+  handler jadi `async`; tangkap `ApiError` — `code==='passcode_required'` → tampilkan form passcode.
+- `Daftar.tsx`: hapus cek email-duplikat lokal (server balas 409); submit async.
+- `AppShell.tsx` (UserMenu): hapus daftar "ganti akun" & alur `loginAs` — sisakan avatar/nama/role + tombol Keluar.
+
+## Langkah 5 — Modul bisnis (kerjakan berurutan)
+
+### 5a. User Management → `Users.tsx`
+Endpoint 🔒admin: `GET /users` · `POST /users {name,email,password}` · `PATCH /users/{id}/active {active}`.
+- Daftar akun dari `GET /users` (sudah otomatis terbatas toko admin); tombol aktif/nonaktif hanya untuk `role==='cashier'`.
+
+### 5b. Produk + Kategori → `Produk.tsx`
+- List: `GET /products?q=&categoryId=&active=&page=&limit=` (search & pagination server-side).
+- Create/Update: `POST /products` (stok awal hanya saat create) · `PUT /products/{id}` (**tidak menyentuh stok**) · toggle `PATCH …/active`.
+- Kategori: `POST /categories` · `DELETE /categories/{id}` — respons `{soft_deleted:true}` artinya masih dipakai produk (tampilkan info, histori tetap aman).
+- SKU duplikat → 409 `"SKU sudah digunakan di toko ini."`. Import CSV: commit baris-per-baris via `POST /products`, laporkan per baris. Export CSV: tarik semua halaman (`limit=200`) lalu susun CSV di klien.
+
+### 5c. Stok → `Stok.tsx`
+- Status stok = produk dari `GET /products` (ambil semua halaman).
+- Penyesuaian: `POST /stock/adjustments {productId, direction:'plus'|'minus', qty, reason}` — error `"stok tidak boleh negatif"` tampilkan di modal.
+- Riwayat: `GET /movements?page=` (terbaru dulu).
+
+### 5d. POS → `Pos.tsx`
+- Katalog: `GET /products?active=true` (semua halaman); **stok efektif = stock − jumlah di keranjang**.
+- Checkout: `POST /transactions` dengan **hanya** `{items:[{productId,qty}], discount?, method, paid?, customer?}` — subtotal/diskon-validasi/pajak/total/kembalian dihitung server; respons = objek transaksi lengkap → render struk darinya, lalu muat ulang katalog.
+- Header/footer/paper/nama toko struk: dari `GET /settings`.
+
+### 5e. Transaksi → `Transaksi.tsx`
+- List: `GET /transactions?q=&method=&date=&page=` — kasir otomatis hanya melihat miliknya (jangan filter role di klien).
+- Refund (tampilkan tombol hanya untuk admin): `POST /transactions/{id}/refund {items:[{productId,qty}], reason}` — parsial boleh; dobel/kelebihan ditolak server (tampilkan pesannya).
+
+### 5f. Dashboard & Laporan → `Dashboard.tsx`, `Laporan.tsx`
+- `GET /dashboard` → bentuk berbeda per `role`: admin (KPI hari ini, `sales7`, `methods`, `top_products`, `recent`) vs kasir (ringkasan shift sendiri saja).
+- `GET /reports?period=today|yesterday|week|month|all` → komposit `{summary, by_method, by_status, products, transactions(HPP+profit), stock}`; export CSV disusun di klien dari data ini.
+
+### 5g. Pengaturan → `Pengaturan.tsx`
+- `GET /settings` · `PUT /settings {storeName,address,phone,taxEnabled,taxPct,receiptHeader,receiptFooter,paper,timezone}` 🔒admin.
+- Passcode per akun: `PUT /users/{id}/passcode {passcode:"12345"|""(hapus)}` 🔒admin.
+- Hapus semua `mutate()` lokal di halaman ini.
+
+## Gotcha yang sering menjebak
+
+1. **CORS**: setelah frontend online, kirim domainnya ke tim backend agar masuk `CORS_ORIGINS` — tanpa itu browser memblokir request (curl/postman tidak terpengaruh).
+2. **`.env` tidak ikut deploy** — variabel produksi di-set via dashboard Vercel, lalu Redeploy.
+3. `VITE_*` ditanam saat **build**; ganti nilai = build ulang.
+4. Data lama di localStorage biarkan saja — halaman terintegrasi tak membacanya lagi.
+5. Transaksi yang dibuat SEBELUM integrasi tidak akan muncul di server.
+
+## Urutan pengerjaan yang disarankan
+
+`api.ts` + proxy → auth (Langkah 3–4) → Users → Produk → Stok → Pos → Transaksi → Dashboard/Laporan/Pengaturan.
+Setiap tahap sudah bisa diuji mandiri terhadap API produksi.
+
+---
+*Kontrak detail tiap endpoint: [`PROJECT.md`](./PROJECT.md). Pertanyaan/permintaan perubahan kontrak: tim backend.*
