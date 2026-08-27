@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/0xMinomus/openPOS/backend/model"
 	"github.com/0xMinomus/openPOS/backend/repo"
 )
@@ -34,18 +36,31 @@ func (s *UserService) List(ctx context.Context, storeID string) ([]model.PublicU
 	return out, nil
 }
 
-// CreateCashier membuat akun kasir baru di toko admin.
-// Kasir hanya perlu nama — tidak ada email, tidak ada password.
-// Login dilakukan via switch account dari admin.
-func (s *UserService) CreateCashier(ctx context.Context, storeID, name string) (*model.PublicUser, error) {
+// CreateCashier membuat akun kasir baru di toko admin (FR-USR-001).
+func (s *UserService) CreateCashier(ctx context.Context, storeID, name, email, password string) (*model.PublicUser, error) {
 	name = strings.TrimSpace(name)
+	email = strings.ToLower(strings.TrimSpace(email))
 
 	if name == "" {
 		return nil, fmt.Errorf("nama wajib diisi")
 	}
+	if !isEmail(email) {
+		return nil, fmt.Errorf("format email tidak valid")
+	}
+	if len(password) < 8 {
+		return nil, fmt.Errorf("kata sandi minimal 8 karakter")
+	}
 
-	u, err := s.users.CreateCashier(ctx, storeID, name)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
+		return nil, err
+	}
+
+	u, err := s.users.CreateCashier(ctx, storeID, email, name, string(hash))
+	if err != nil {
+		if errors.Is(err, repo.ErrDuplicate) {
+			return nil, ErrEmailTaken
+		}
 		return nil, err
 	}
 	p := u.Public()

@@ -31,7 +31,7 @@ type User struct {
 // PublicUser adalah bentuk user yang dikirim ke klien (tanpa hash).
 type PublicUser struct {
 	ID        string    `json:"id"`
-	Email     string    `json:"email,omitempty"`
+	Email     string    `json:"email"`
 	Name      string    `json:"name"`
 	Role      Role      `json:"role"`
 	Active    bool      `json:"active"`
