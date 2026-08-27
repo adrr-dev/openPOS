@@ -169,16 +169,27 @@ Daftar seluruh akun dalam toko (tertua dulu).
 
 ### `POST /users`
 
-Buat akun kasir baru.
+Buat akun kasir baru. Kasir hanya perlu nama — tidak ada email, tidak ada password. Login dilakukan via switch account dari admin.
 
 **Request:**
 ```json
-{ "name": "Andi", "email": "andi@tokosaya.com", "password": "minimal8char" }
+{ "name": "Andi" }
 ```
 
-**Response `201`:** `{ "user": { … } }`
+**Response `201`:**
+```json
+{
+  "user": {
+    "id": "uuid",
+    "name": "Andi",
+    "role": "cashier",
+    "active": true,
+    "store_id": "uuid"
+  }
+}
+```
 
-**Error:** `400` validasi · `409` email sudah terdaftar
+**Error:** `400` nama wajib diisi
 
 ### `PATCH /users/{id}/active`
 

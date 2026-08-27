@@ -18,9 +18,7 @@ type UserHandler struct {
 func NewUserHandler(svc *service.UserService) *UserHandler { return &UserHandler{svc: svc} }
 
 type createUserReq struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name string `json:"name"`
 }
 
 type setActiveReq struct {
@@ -48,7 +46,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
 		return
 	}
-	user, err := h.svc.CreateCashier(r.Context(), c.StoreID, req.Name, req.Email, req.Password)
+	user, err := h.svc.CreateCashier(r.Context(), c.StoreID, req.Name)
 	if err != nil {
 		respondUserErr(w, err)
 		return

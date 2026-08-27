@@ -34,7 +34,7 @@ type UserRepo struct {
 
 func NewUserRepo(pool *pgxpool.Pool) *UserRepo { return &UserRepo{pool: pool} }
 
-const userCols = `u.id, u.store_id, u.email, u.name, u.password_hash, u.passcode_hash,
+const userCols = `u.id, u.store_id, COALESCE(u.email, ''), u.name, COALESCE(u.password_hash, ''), u.passcode_hash,
 	u.role, u.active, u.created_at, s.name`
 
 func scanUser(row pgx.Row) (*model.User, error) {
@@ -92,13 +92,14 @@ func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.Us
 }
 
 // CreateCashier membuat akun kasir baru dalam satu toko.
-func (r *UserRepo) CreateCashier(ctx context.Context, storeID, email, name, passwordHash string) (*model.User, error) {
+// Kasir tidak memiliki email maupun password — hanya login via switch account.
+func (r *UserRepo) CreateCashier(ctx context.Context, storeID, name string) (*model.User, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO users (store_id, email, name, password_hash, role, active)
-		VALUES ($1, $2, $3, $4, 'cashier', TRUE)
+		INSERT INTO users (store_id, name, role, active)
+		VALUES ($1, $2, 'cashier', TRUE)
 		RETURNING id
-	`, storeID, email, name, passwordHash).Scan(&id)
+	`, storeID, name).Scan(&id)
 	if err != nil {
 		return nil, mapDBErr(err)
 	}
