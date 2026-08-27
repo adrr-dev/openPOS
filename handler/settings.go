@@ -105,7 +105,7 @@ func (h *SettingsHandler) SetPasscode(w http.ResponseWriter, r *http.Request) {
 // Dashboard — GET /api/v1/dashboard 🔒 role-aware
 func (h *SettingsHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
-	data, err := h.svc.Dashboard(r.Context(), c.StoreID, c.UserID, c.ActingAsCashierID, c.ActingAsCashierID != nil)
+	data, err := h.svc.Dashboard(r.Context(), c.StoreID, c.UserID, c.Role != model.RoleAdmin)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat dashboard.")
 		return

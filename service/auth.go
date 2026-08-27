@@ -24,22 +24,19 @@ var (
 	ErrEmailTaken         = errors.New("email sudah terdaftar")
 	ErrAccountInactive    = errors.New("akun dinonaktifkan")
 	ErrTokenInvalid       = errors.New("sesi tidak valid, silakan masuk kembali")
-	ErrSwitchSelf         = errors.New("tidak dapat beralih ke akun sendiri")
 )
 
 type AuthService struct {
 	users      *repo.UserRepo
-	cashiers   *repo.CashierRepo
 	refresh    *repo.RefreshRepo
 	jwtSecret  []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
+func NewAuthService(users *repo.UserRepo, refresh *repo.RefreshRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
 	return &AuthService{
 		users:      users,
-		cashiers:   cashiers,
 		refresh:    refresh,
 		jwtSecret:  []byte(jwtSecret),
 		accessTTL:  accessTTL,
@@ -80,7 +77,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 		return nil, nil, err
 	}
 
-	pair, err := s.issueTokens(ctx, user.ID, nil)
+	pair, err := s.issueTokens(ctx, user)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,7 +86,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 
 // ── login ────────────────────────────────────────────────────────────
 
-func (s *AuthService) Login(ctx context.Context, email, password string) (*model.User, *model.TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, email, password, passcode string) (*model.User, *model.TokenPair, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	user, err := s.users.GetByEmail(ctx, email)
@@ -102,11 +99,19 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*model
 	if !user.Active {
 		return nil, nil, ErrAccountInactive
 	}
-	if user.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return nil, nil, ErrInvalidCredentials
 	}
+	if user.PasscodeHash != nil && *user.PasscodeHash != "" {
+		if passcode == "" {
+			return nil, nil, ErrPasscodeRequired
+		}
+		if bcrypt.CompareHashAndPassword([]byte(*user.PasscodeHash), []byte(passcode)) != nil {
+			return nil, nil, ErrPasscodeWrong
+		}
+	}
 
-	pair, err := s.issueTokens(ctx, user.ID, nil)
+	pair, err := s.issueTokens(ctx, user)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +147,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.
 	if err := s.refresh.Revoke(ctx, hash); err != nil {
 		return nil, nil, err
 	}
-	pair, err := s.issueTokens(ctx, user.ID, nil)
+	pair, err := s.issueTokens(ctx, user)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -158,78 +163,70 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
 
 // ── switch account ──────────────────────────────────────────────────
 
-// Switch memungkinkan owner beralih sesi ke kasir dalam toko yang sama.
-// Mengembalikan token baru dengan ActingAsCashierID terisi.
-func (s *AuthService) Switch(ctx context.Context, ownerID, cashierID, passcode string) (*model.Cashier, *model.TokenPair, error) {
-	owner, err := s.users.GetByID(ctx, ownerID)
+var ErrSwitchSelf = errors.New("tidak dapat beralih ke akun sendiri")
+
+// Switch memungkinkan user dalam satu toko beralih sesi ke akun lain.
+// Jika target punya passcode, passcode wajib divalidasi.
+// Jika target tidak punya passcode, switch langsung berhasil.
+func (s *AuthService) Switch(ctx context.Context, callerID, targetID, passcode string) (*model.User, *model.TokenPair, error) {
+	if callerID == targetID {
+		return nil, nil, ErrSwitchSelf
+	}
+
+	caller, err := s.users.GetByID(ctx, callerID)
 	if err != nil {
 		return nil, nil, ErrTokenInvalid
 	}
-	if !owner.Active {
-		return nil, nil, ErrAccountInactive
-	}
 
-	cashier, err := s.cashiers.GetByID(ctx, cashierID)
+	target, err := s.users.GetByID(ctx, targetID)
 	if err != nil {
 		return nil, nil, repo.ErrNotFound
 	}
-	if cashier.OwnerID != owner.ID {
+	if target.StoreID != caller.StoreID {
 		return nil, nil, repo.ErrNotFound
 	}
-	if !cashier.Active {
+	if !target.Active {
 		return nil, nil, ErrAccountInactive
 	}
 
-	// validasi passcode bila ada
-	if cashier.PasscodeHash != nil && *cashier.PasscodeHash != "" {
+	if target.PasscodeHash != nil && *target.PasscodeHash != "" {
 		if passcode == "" {
 			return nil, nil, ErrPasscodeRequired
 		}
-		if bcrypt.CompareHashAndPassword([]byte(*cashier.PasscodeHash), []byte(passcode)) != nil {
+		if bcrypt.CompareHashAndPassword([]byte(*target.PasscodeHash), []byte(passcode)) != nil {
 			return nil, nil, ErrPasscodeWrong
 		}
 	}
 
-	// issue token baru dengan acting_as cashier
-	pair, err := s.issueTokens(ctx, owner.ID, &cashier.ID)
+	pair, err := s.issueTokens(ctx, target)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cashier, pair, nil
+	return target, pair, nil
 }
 
 // ── internal ─────────────────────────────────────────────────────────
 
 // Claims adalah isi payload access token.
 type Claims struct {
-	UserID            string
-	StoreID           string
-	Name              string
-	Email             string
-	ActingAsCashierID *string // non-nil = sedang operates sebagai kasir ini
+	UserID  string
+	StoreID string
+	Role    model.Role
+	Name    string
+	Email   string
 }
 
-func (s *AuthService) issueTokens(ctx context.Context, ownerID string, actingAsCashierID *string) (*model.TokenPair, error) {
-	// ambil data owner untuk claims
-	owner, err := s.users.GetByID(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-
+func (s *AuthService) issueTokens(ctx context.Context, u *model.User) (*model.TokenPair, error) {
 	now := time.Now()
-	mapClaims := jwt.MapClaims{
-		"sub":   owner.ID,
-		"sid":   owner.StoreID,
-		"name":  owner.Name,
-		"email": owner.Email,
+	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":   u.ID,
+		"sid":   u.StoreID,
+		"role":  string(u.Role),
+		"name":  u.Name,
+		"email": u.Email,
 		"iat":   now.Unix(),
 		"exp":   now.Add(s.accessTTL).Unix(),
-	}
-	if actingAsCashierID != nil {
-		mapClaims["acting_as"] = *actingAsCashierID
-	}
-
-	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, mapClaims).SignedString(s.jwtSecret)
+	}).SignedString(s.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +237,7 @@ func (s *AuthService) issueTokens(ctx context.Context, ownerID string, actingAsC
 	}
 	refresh := hex.EncodeToString(raw)
 
-	if err := s.refresh.Create(ctx, owner.ID, hashToken(refresh), now.Add(s.refreshTTL)); err != nil {
+	if err := s.refresh.Create(ctx, u.ID, hashToken(refresh), now.Add(s.refreshTTL)); err != nil {
 		return nil, err
 	}
 
@@ -264,17 +261,13 @@ func (s *AuthService) ParseAccess(tokenStr string) (*Claims, error) {
 	}
 	sub, _ := mc["sub"].(string)
 	sid, _ := mc["sid"].(string)
+	role, _ := mc["role"].(string)
 	name, _ := mc["name"].(string)
 	email, _ := mc["email"].(string)
-	actingAs, _ := mc["acting_as"].(string)
 	if sub == "" {
 		return nil, ErrTokenInvalid
 	}
-	c := &Claims{UserID: sub, StoreID: sid, Name: name, Email: email}
-	if actingAs != "" {
-		c.ActingAsCashierID = &actingAs
-	}
-	return c, nil
+	return &Claims{UserID: sub, StoreID: sid, Role: model.Role(role), Name: name, Email: email}, nil
 }
 
 func hashToken(raw string) string {

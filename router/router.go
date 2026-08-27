@@ -1,3 +1,7 @@
+// Package router menyatukan seluruh dependensi aplikasi (config, DB, handler,
+// route chi) menjadi satu http.Handler yang dapat dipakai dua pintu:
+//   - server jangka panjang (cmd/api) untuk lokal/VPS
+//   - fungsi serverless Vercel (api/index.go)
 package router
 
 import (
@@ -14,16 +18,19 @@ import (
 	"github.com/0xMinomus/openPOS/backend/db"
 	"github.com/0xMinomus/openPOS/backend/handler"
 	"github.com/0xMinomus/openPOS/backend/middleware"
+	"github.com/0xMinomus/openPOS/backend/model"
 	"github.com/0xMinomus/openPOS/backend/repo"
 	"github.com/0xMinomus/openPOS/backend/service"
 )
 
+// Server adalah hasil penyusunan aplikasi.
 type Server struct {
 	Handler http.Handler
 	Port    string
-	Cleanup func()
+	Cleanup func() // tutup koneksi DB (aman dipanggil berulang)
 }
 
+// New memuat config, menghubungkan & memigrasikan database, lalu merakit route.
 func New(ctx context.Context) (*Server, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -43,7 +50,6 @@ func New(ctx context.Context) (*Server, error) {
 	log.Println("migrasi: ok")
 
 	userRepo := repo.NewUserRepo(pool)
-	cashierRepo := repo.NewCashierRepo(pool)
 	refreshRepo := repo.NewRefreshRepo(pool)
 	categoryRepo := repo.NewCategoryRepo(pool)
 	productRepo := repo.NewProductRepo(pool)
@@ -51,12 +57,11 @@ func New(ctx context.Context) (*Server, error) {
 	trxRepo := repo.NewTrxRepo(pool)
 	storeRepo := repo.NewStoreRepo(pool)
 	reportRepo := repo.NewReportRepo(pool)
-
-	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
-	userSvc := service.NewUserService(userRepo, cashierRepo)
+	authSvc := service.NewAuthService(userRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
+	userSvc := service.NewUserService(userRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
 	trxSvc := service.NewTrxService(trxRepo)
-	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
+	settingsSvc := service.NewSettingsService(storeRepo, userRepo, reportRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)
@@ -92,7 +97,7 @@ func New(ctx context.Context) (*Server, error) {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(authSvc))
 			r.Get("/auth/me", authH.Me)
-			r.Post("/auth/switch", authH.Switch) // owner → kasir
+			r.Post("/auth/switch", authH.Switch)
 
 			// katalog: semua role boleh membaca (POS kasir), tulis hanya admin
 			r.Get("/categories", catalogH.ListCategories)
@@ -104,9 +109,9 @@ func New(ctx context.Context) (*Server, error) {
 			r.Get("/settings", settingsH.Get)
 			r.Get("/dashboard", settingsH.Dashboard)
 
-			// khusus admin (owner)
+			// khusus admin
 			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireRole("admin"))
+				r.Use(middleware.RequireRole(string(model.RoleAdmin)))
 				r.Get("/users", userH.List)
 				r.Post("/users", userH.Create)
 				r.Patch("/users/{id}/active", userH.SetActive)

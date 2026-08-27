@@ -17,7 +17,7 @@ type UserHandler struct {
 
 func NewUserHandler(svc *service.UserService) *UserHandler { return &UserHandler{svc: svc} }
 
-type createCashierReq struct {
+type createUserReq struct {
 	Name string `json:"name"`
 }
 
@@ -25,36 +25,36 @@ type setActiveReq struct {
 	Active bool `json:"active"`
 }
 
-// List menampilkan seluruh kasir dalam toko.
+// List menampilkan seluruh akun dalam toko admin.
 // GET /api/v1/users — 🔒 admin
 func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
-	cashiers, err := h.svc.ListCashiers(r.Context(), c.UserID)
+	users, err := h.svc.List(r.Context(), c.StoreID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Gagal memuat daftar kasir.")
+		writeError(w, http.StatusInternalServerError, "Gagal memuat daftar akun.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": cashiers})
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
-// Create membuat kasir baru.
+// Create membuat akun kasir baru.
 // POST /api/v1/users — 🔒 admin
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
-	var req createCashierReq
+	var req createUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
 		return
 	}
-	cashier, err := h.svc.CreateCashier(r.Context(), c.UserID, req.Name)
+	user, err := h.svc.CreateCashier(r.Context(), c.StoreID, req.Name)
 	if err != nil {
 		respondUserErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"user": cashier})
+	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 
-// SetActive mengaktifkan/menonaktifkan kasir.
+// SetActive mengaktifkan/menonaktifkan akun kasir.
 // PATCH /api/v1/users/{id}/active — 🔒 admin
 func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
@@ -63,7 +63,7 @@ func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
 		return
 	}
-	if err := h.svc.SetActive(r.Context(), c.UserID, chi.URLParam(r, "id"), req.Active); err != nil {
+	if err := h.svc.SetActive(r.Context(), c.StoreID, chi.URLParam(r, "id"), req.Active); err != nil {
 		respondUserErr(w, err)
 		return
 	}
@@ -76,8 +76,10 @@ func (h *UserHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 
 func respondUserErr(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, service.ErrEmailTaken):
+		writeError(w, http.StatusConflict, "Email sudah terdaftar.")
 	case errors.Is(err, service.ErrStoreMismatch):
-		writeError(w, http.StatusNotFound, "Kasir tidak ditemukan di toko Anda.")
+		writeError(w, http.StatusNotFound, "Akun tidak ditemukan di toko Anda.")
 	case errors.Is(err, service.ErrNotEditable):
 		writeError(w, http.StatusBadRequest, "Hanya akun kasir yang dapat dinonaktifkan.")
 	default:

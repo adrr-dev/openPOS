@@ -33,8 +33,7 @@ func (r *StoreRepo) GetSettings(ctx context.Context, storeID string) (*model.Sto
 // GetTimezone mengembalikan zona waktu toko (fallback Asia/Makassar bila kosong).
 func (r *StoreRepo) GetTimezone(ctx context.Context, storeID string) (string, error) {
 	var tz string
-	err := r.pool.QueryRow(ctx,
-		`SELECT COALESCE(NULLIF(timezone,''),'Asia/Makassar') FROM stores WHERE id = $1`, storeID).Scan(&tz)
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(timezone,''),'Asia/Makassar') FROM stores WHERE id = $1`, storeID).Scan(&tz)
 	return tz, err
 }
 
@@ -45,4 +44,18 @@ func (r *StoreRepo) UpdateSettings(ctx context.Context, storeID string, s *model
 		WHERE id = $1 RETURNING `+setCols+`
 	`, storeID, s.Name, s.Address, s.Phone, s.TaxEnabled, s.TaxPct,
 		s.ReceiptHeader, s.ReceiptFooter, s.Paper, s.Timezone))
+}
+
+// SetPasscode mengatur/menghapus passcode akun (hash disimpan di sini).
+func (r *StoreRepo) SetPasscode(ctx context.Context, storeID, userID string, hash *string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE users SET passcode_hash = $3 WHERE id = $1 AND store_id = $2`,
+		userID, storeID, hash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
