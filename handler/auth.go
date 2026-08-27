@@ -7,6 +7,7 @@ import (
 
 	"github.com/0xMinomus/openPOS/backend/middleware"
 	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/0xMinomus/openPOS/backend/repo"
 	"github.com/0xMinomus/openPOS/backend/service"
 )
 
@@ -35,6 +36,11 @@ type refreshReq struct {
 
 type logoutReq struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+type switchReq struct {
+	TargetUserID string `json:"target_user_id"`
+	Passcode     string `json:"passcode,omitempty"`
 }
 
 type authResponse struct {
@@ -109,6 +115,44 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": user.Public()})
+}
+
+// Switch beralih sesi ke akun lain dalam toko yang sama.
+// POST /api/v1/auth/switch  (Bearer access token)
+func (h *AuthHandler) Switch(w http.ResponseWriter, r *http.Request) {
+	c := middleware.ClaimsFrom(r.Context())
+	var req switchReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+		return
+	}
+	if req.TargetUserID == "" {
+		writeError(w, http.StatusBadRequest, "target_user_id wajib diisi")
+		return
+	}
+	user, pair, err := h.auth.Switch(r.Context(), c.UserID, req.TargetUserID, req.Passcode)
+	if err != nil {
+		respondSwitchErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+}
+
+func respondSwitchErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrSwitchSelf):
+		writeError(w, http.StatusBadRequest, "Tidak dapat beralih ke akun sendiri.")
+	case errors.Is(err, service.ErrPasscodeRequired):
+		writeError(w, http.StatusUnauthorized, "passcode_required")
+	case errors.Is(err, service.ErrPasscodeWrong):
+		writeError(w, http.StatusUnauthorized, "Passcode salah. Coba lagi.")
+	case errors.Is(err, service.ErrAccountInactive):
+		writeError(w, http.StatusForbidden, "Akun dinonaktifkan.")
+	case errors.Is(err, repo.ErrNotFound):
+		writeError(w, http.StatusNotFound, "Akun tidak ditemukan.")
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
 }
 
 func respondAuthErr(w http.ResponseWriter, err error) {

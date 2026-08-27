@@ -97,6 +97,7 @@ func New(ctx context.Context) (*Server, error) {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(authSvc))
 			r.Get("/auth/me", authH.Me)
+			r.Post("/auth/switch", authH.Switch)
 
 			// katalog: semua role boleh membaca (POS kasir), tulis hanya admin
 			r.Get("/categories", catalogH.ListCategories)

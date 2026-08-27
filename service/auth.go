@@ -161,6 +161,50 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
 	_ = s.refresh.Revoke(ctx, hashToken(refreshToken))
 }
 
+// ── switch account ──────────────────────────────────────────────────
+
+var ErrSwitchSelf = errors.New("tidak dapat beralih ke akun sendiri")
+
+// Switch memungkinkan user dalam satu toko beralih sesi ke akun lain.
+// Jika target punya passcode, passcode wajib divalidasi.
+// Jika target tidak punya passcode, switch langsung berhasil.
+func (s *AuthService) Switch(ctx context.Context, callerID, targetID, passcode string) (*model.User, *model.TokenPair, error) {
+	if callerID == targetID {
+		return nil, nil, ErrSwitchSelf
+	}
+
+	caller, err := s.users.GetByID(ctx, callerID)
+	if err != nil {
+		return nil, nil, ErrTokenInvalid
+	}
+
+	target, err := s.users.GetByID(ctx, targetID)
+	if err != nil {
+		return nil, nil, repo.ErrNotFound
+	}
+	if target.StoreID != caller.StoreID {
+		return nil, nil, repo.ErrNotFound
+	}
+	if !target.Active {
+		return nil, nil, ErrAccountInactive
+	}
+
+	if target.PasscodeHash != nil && *target.PasscodeHash != "" {
+		if passcode == "" {
+			return nil, nil, ErrPasscodeRequired
+		}
+		if bcrypt.CompareHashAndPassword([]byte(*target.PasscodeHash), []byte(passcode)) != nil {
+			return nil, nil, ErrPasscodeWrong
+		}
+	}
+
+	pair, err := s.issueTokens(ctx, target)
+	if err != nil {
+		return nil, nil, err
+	}
+	return target, pair, nil
+}
+
 // ── internal ─────────────────────────────────────────────────────────
 
 // Claims adalah isi payload access token.
