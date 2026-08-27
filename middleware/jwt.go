@@ -33,7 +33,9 @@ func Auth(authSvc *service.AuthService) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireRole membatasi akses berdasarkan peran (dipakai modul berikutnya).
+// RequireRole membatasi akses berdasarkan peran.
+// "admin" = owner mode (ActingAsCashierID kosong).
+// Semua role lain = selalu boleh (cashier routes).
 func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +45,8 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 				return
 			}
 			for _, role := range roles {
-				if string(c.Role) == role {
+				// "admin" = owner mode (tidak sedang acting sebagai kasir)
+				if role == "admin" && c.ActingAsCashierID == nil {
 					next.ServeHTTP(w, r)
 					return
 				}

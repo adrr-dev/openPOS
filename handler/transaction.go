@@ -48,7 +48,12 @@ func (h *TrxHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		cmd.Items = append(cmd.Items, service.CheckoutItemCmd{ProductID: it.ProductID, Qty: it.Qty})
 	}
 
-	trx, err := h.svc.Checkout(r.Context(), c.StoreID, c.UserID, c.Name, cmd)
+	cashierID := c.UserID
+	cashierName := c.Name
+	if c.ActingAsCashierID != nil {
+		cashierID = *c.ActingAsCashierID
+	}
+	trx, err := h.svc.Checkout(r.Context(), c.StoreID, cashierID, cashierName, cmd)
 	if err != nil {
 		respondTrxErr(w, err)
 		return
@@ -63,8 +68,8 @@ func (h *TrxHandler) List(w http.ResponseWriter, r *http.Request) {
 	qp := r.URL.Query()
 
 	cashierID := ""
-	if c.Role != "admin" {
-		cashierID = c.UserID
+	if c.ActingAsCashierID != nil {
+		cashierID = *c.ActingAsCashierID
 	}
 	page, _ := strconv.Atoi(qp.Get("page"))
 	limit, _ := strconv.Atoi(qp.Get("limit"))
@@ -87,7 +92,7 @@ func (h *TrxHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// kasir hanya boleh detail miliknya
-	if c.Role != "admin" && trx.CashierID != c.UserID {
+	if c.ActingAsCashierID != nil && trx.CashierID != *c.ActingAsCashierID {
 		writeError(w, http.StatusNotFound, "Transaksi tidak ditemukan.")
 		return
 	}

@@ -40,7 +40,7 @@ type CheckoutInput struct {
 	Customer    string
 }
 
-const trxCols = `t.id, t.seq, t.cashier_id, t.cashier_name, t.subtotal, t.discount,
+const trxCols = `t.id, t.seq, t.cashier_id, c.name, t.subtotal, t.discount,
 	t.tax, t.total, t.method, t.paid, t.change, t.status, t.customer, t.created_at`
 
 func scanTrx(row interface{ Scan(...any) error }) (*model.Trx, error) {
@@ -240,7 +240,9 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 	}
 
 	t, err := scanTrx(tx.QueryRow(ctx, `
-		SELECT `+trxCols+` FROM transactions t WHERE t.id = $1 AND t.store_id = $2 FOR UPDATE
+		SELECT `+trxCols+` FROM transactions t
+		JOIN cashiers c ON c.id = t.cashier_id
+		WHERE t.id = $1 AND t.store_id = $2 FOR UPDATE
 	`, trxID, storeID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -418,7 +420,9 @@ func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date 
 	args = append(args, limit, (page-1)*limit)
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT `+trxCols+` FROM transactions t`+where+`
+		SELECT `+trxCols+` FROM transactions t
+		JOIN cashiers c ON c.id = t.cashier_id
+		`+where+`
 		ORDER BY t.created_at DESC, t.seq DESC
 		LIMIT $`+strconv.Itoa(limitIdx)+` OFFSET $`+strconv.Itoa(offsetIdx), args...,
 	)
@@ -487,7 +491,9 @@ func attachTrxItems(ctx context.Context, q rowQuerier, list []*model.Trx, ids []
 // GetByID detail transaksi beserta item.
 func (r *TrxRepo) GetByID(ctx context.Context, storeID, id string) (*model.Trx, error) {
 	t, err := scanTrx(r.pool.QueryRow(ctx, `
-		SELECT `+trxCols+` FROM transactions t WHERE t.id = $1 AND t.store_id = $2
+		SELECT `+trxCols+` FROM transactions t
+		JOIN cashiers c ON c.id = t.cashier_id
+		WHERE t.id = $1 AND t.store_id = $2
 	`, id, storeID))
 	if err != nil {
 		return nil, mapDBErr(err)

@@ -27,7 +27,6 @@ type registerReq struct {
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	Passcode string `json:"passcode,omitempty"`
 }
 
 type refreshReq struct {
@@ -39,16 +38,11 @@ type logoutReq struct {
 }
 
 type switchReq struct {
-	TargetUserID string `json:"target_user_id"`
-	Passcode     string `json:"passcode,omitempty"`
+	CashierID string `json:"cashier_id"`
+	Passcode  string `json:"passcode,omitempty"`
 }
 
-type authResponse struct {
-	User model.PublicUser `json:"user"`
-	model.TokenPair
-}
-
-// Register membuat Store + akun Admin sekaligus, lalu langsung login.
+// Register membuat Store + akun Owner sekaligus, lalu langsung login.
 // POST /api/v1/auth/register
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
@@ -64,7 +58,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, authResponse{User: user.Public(), TokenPair: *pair})
 }
 
-// Login memverifikasi email + password (+ passcode bila akun dilindungi).
+// Login memverifikasi email + password (owner only).
 // POST /api/v1/auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
@@ -72,7 +66,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
 		return
 	}
-	user, pair, err := h.auth.Login(r.Context(), req.Email, req.Password, req.Passcode)
+	user, pair, err := h.auth.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		respondAuthErr(w, err)
 		return
@@ -105,7 +99,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "keluar berhasil"})
 }
 
-// Me mengembalikan profil user sesi aktif.
+// Me mengembalikan profil owner sesi aktif.
 // GET /api/v1/auth/me  (Bearer access token)
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
@@ -117,8 +111,8 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"user": user.Public()})
 }
 
-// Switch beralih sesi ke akun lain dalam toko yang sama.
-// POST /api/v1/auth/switch  (Bearer access token)
+// Switch beralih sesi ke kasir dalam toko yang sama.
+// POST /api/v1/auth/switch  (Bearer access token — owner only)
 func (h *AuthHandler) Switch(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
 	var req switchReq
@@ -126,22 +120,29 @@ func (h *AuthHandler) Switch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
 		return
 	}
-	if req.TargetUserID == "" {
-		writeError(w, http.StatusBadRequest, "target_user_id wajib diisi")
+	if req.CashierID == "" {
+		writeError(w, http.StatusBadRequest, "cashier_id wajib diisi")
 		return
 	}
-	user, pair, err := h.auth.Switch(r.Context(), c.UserID, req.TargetUserID, req.Passcode)
+	cashier, pair, err := h.auth.Switch(r.Context(), c.UserID, req.CashierID, req.Passcode)
 	if err != nil {
 		respondSwitchErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+	// return cashier info + token baru
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user": map[string]any{
+			"id":       cashier.ID,
+			"name":     cashier.Name,
+			"active":   cashier.Active,
+		},
+		"access_token":  pair.AccessToken,
+		"refresh_token": pair.RefreshToken,
+	})
 }
 
 func respondSwitchErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrSwitchSelf):
-		writeError(w, http.StatusBadRequest, "Tidak dapat beralih ke akun sendiri.")
 	case errors.Is(err, service.ErrPasscodeRequired):
 		writeError(w, http.StatusUnauthorized, "passcode_required")
 	case errors.Is(err, service.ErrPasscodeWrong):
@@ -149,7 +150,7 @@ func respondSwitchErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrAccountInactive):
 		writeError(w, http.StatusForbidden, "Akun dinonaktifkan.")
 	case errors.Is(err, repo.ErrNotFound):
-		writeError(w, http.StatusNotFound, "Akun tidak ditemukan.")
+		writeError(w, http.StatusNotFound, "Kasir tidak ditemukan.")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
@@ -170,6 +171,11 @@ func respondAuthErr(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
+}
+
+type authResponse struct {
+	User interface{} `json:"user"`
+	model.TokenPair
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {

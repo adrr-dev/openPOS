@@ -14,13 +14,14 @@ import (
 )
 
 type SettingsService struct {
-	stores  *repo.StoreRepo
-	users   *repo.UserRepo
-	reports *repo.ReportRepo
+	stores   *repo.StoreRepo
+	users    *repo.UserRepo
+	cashiers *repo.CashierRepo
+	reports  *repo.ReportRepo
 }
 
-func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, reports *repo.ReportRepo) *SettingsService {
-	return &SettingsService{stores: stores, users: users, reports: reports}
+func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, cashiers *repo.CashierRepo, reports *repo.ReportRepo) *SettingsService {
+	return &SettingsService{stores: stores, users: users, cashiers: cashiers, reports: reports}
 }
 
 func (s *SettingsService) Get(ctx context.Context, storeID string) (*model.StoreSettings, error) {
@@ -49,10 +50,18 @@ func (s *SettingsService) Update(ctx context.Context, storeID string, in *model.
 }
 
 // SetPasscode: hash 5 digit; string kosong = hapus passcode.
-// Admin dapat mengatur akun mana pun dalam tokonya.
-func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetUserID, passcode string) error {
-	target, err := s.users.GetByID(ctx, targetUserID)
-	if err != nil || target.StoreID != storeID {
+// Admin dapat mengatur passcode kasir mana pun dalam tokonya.
+func (s *SettingsService) SetPasscode(ctx context.Context, storeID, cashierID, passcode string) error {
+	c, err := s.cashiers.GetByID(ctx, cashierID)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return ErrStoreMismatch
+		}
+		return err
+	}
+	// pastikan kasir ini milik owner di toko yang benar
+	owner, err := s.users.GetByID(ctx, c.OwnerID)
+	if err != nil || owner.StoreID != storeID {
 		return ErrStoreMismatch
 	}
 	passcode = strings.TrimSpace(passcode)
@@ -73,17 +82,22 @@ func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetUserID
 		hs := string(h)
 		hash = &hs
 	}
-	err = s.stores.SetPasscode(ctx, storeID, targetUserID, hash)
+	err = s.cashiers.SetPasscode(ctx, cashierID, hash)
 	if err == repo.ErrNotFound {
 		return ErrStoreMismatch
 	}
 	return err
 }
 
-func (s *SettingsService) Dashboard(ctx context.Context, storeID, cashierID string, cashierView bool) (any, error) {
+func (s *SettingsService) Dashboard(ctx context.Context, storeID, callerID string, actingAsCashierID *string, cashierView bool) (any, error) {
 	tz, err := s.stores.GetTimezone(ctx, storeID)
 	if err != nil {
 		tz = "Asia/Makassar"
+	}
+	// cashierID: gunakan acting-as cashier bila ada, else caller ID (owner)
+	cashierID := callerID
+	if actingAsCashierID != nil {
+		cashierID = *actingAsCashierID
 	}
 	return s.reports.Dashboard(ctx, storeID, cashierID, cashierView, tz)
 }

@@ -16,57 +16,39 @@ var (
 )
 
 type UserService struct {
-	users *repo.UserRepo
+	users    *repo.UserRepo
+	cashiers *repo.CashierRepo
 }
 
-func NewUserService(users *repo.UserRepo) *UserService { return &UserService{users: users} }
-
-// List mengembalikan seluruh akun dalam satu toko.
-func (s *UserService) List(ctx context.Context, storeID string) ([]model.PublicUser, error) {
-	users, err := s.users.ListByStore(ctx, storeID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]model.PublicUser, 0, len(users))
-	for _, u := range users {
-		out = append(out, u.Public())
-	}
-	return out, nil
+func NewUserService(users *repo.UserRepo, cashiers *repo.CashierRepo) *UserService {
+	return &UserService{users: users, cashiers: cashiers}
 }
 
-// CreateCashier membuat akun kasir baru di toko admin.
-// Kasir hanya perlu nama — tidak ada email, tidak ada password.
-// Login dilakukan via switch account dari admin.
-func (s *UserService) CreateCashier(ctx context.Context, storeID, name string) (*model.PublicUser, error) {
+// ListCashiers mengembalikan seluruh kasir dalam satu toko.
+func (s *UserService) ListCashiers(ctx context.Context, ownerID string) ([]*model.Cashier, error) {
+	return s.cashiers.ListByOwner(ctx, ownerID)
+}
+
+// CreateCashier membuat kasir baru di toko owner.
+func (s *UserService) CreateCashier(ctx context.Context, ownerID, name string) (*model.Cashier, error) {
 	name = strings.TrimSpace(name)
-
 	if name == "" {
 		return nil, fmt.Errorf("nama wajib diisi")
 	}
-
-	u, err := s.users.CreateCashier(ctx, storeID, name)
-	if err != nil {
-		return nil, err
-	}
-	p := u.Public()
-	return &p, nil
+	return s.cashiers.Create(ctx, ownerID, name)
 }
 
-// SetActive menonaktifkan/mengaktifkan akun kasir dalam toko yang sama.
-// Akun admin tidak boleh diubah dari endpoint ini (FR-USR-004).
-func (s *UserService) SetActive(ctx context.Context, storeID, targetUserID string, active bool) error {
-	u, err := s.users.GetByID(ctx, targetUserID)
+// SetActive menonaktifkan/mengaktifkan kasir milik owner tertentu.
+func (s *UserService) SetActive(ctx context.Context, ownerID, cashierID string, active bool) error {
+	c, err := s.cashiers.GetByID(ctx, cashierID)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
 			return ErrStoreMismatch
 		}
 		return err
 	}
-	if u.StoreID != storeID {
+	if c.OwnerID != ownerID {
 		return ErrStoreMismatch
 	}
-	if u.Role != model.RoleCashier {
-		return ErrNotEditable
-	}
-	return s.users.SetActive(ctx, targetUserID, active)
+	return s.cashiers.SetActive(ctx, cashierID, active)
 }
