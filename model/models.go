@@ -28,6 +28,28 @@ type User struct {
 	StoreName    string    `json:"store_name,omitempty"`
 }
 
+type Cashier struct {
+	ID           string    `json:"id"`
+	StoreID      string    `json:"store_id"`
+	Name         string    `json:"name"`
+	PasscodeHash *string   `json:"-"`
+	Active       bool      `json:"active"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func (c *Cashier) Public(storeName string) PublicUser {
+	return PublicUser{
+		ID:        c.ID,
+		Email:     "",
+		Name:      c.Name,
+		Role:      RoleCashier,
+		Active:    c.Active,
+		StoreID:   c.StoreID,
+		StoreName: storeName,
+		CreatedAt: c.CreatedAt,
+	}
+}
+
 // PublicUser adalah bentuk user yang dikirim ke klien (tanpa hash).
 type PublicUser struct {
 	ID        string    `json:"id"`

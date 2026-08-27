@@ -109,12 +109,12 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/auth/me  (Bearer access token)
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	c := middleware.ClaimsFrom(r.Context())
-	user, err := h.auth.Me(r.Context(), c.UserID)
+	pubUser, err := h.auth.Me(r.Context(), c)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": user.Public()})
+	writeJSON(w, http.StatusOK, map[string]any{"user": pubUser})
 }
 
 // Switch beralih sesi ke akun lain dalam toko yang sama.
@@ -130,12 +130,12 @@ func (h *AuthHandler) Switch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "target_user_id wajib diisi")
 		return
 	}
-	user, pair, err := h.auth.Switch(r.Context(), c.UserID, req.TargetUserID, req.Passcode)
+	pubUser, pair, err := h.auth.Switch(r.Context(), c, req.TargetUserID, req.Passcode)
 	if err != nil {
 		respondSwitchErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+	writeJSON(w, http.StatusOK, authResponse{User: *pubUser, TokenPair: *pair})
 }
 
 func respondSwitchErr(w http.ResponseWriter, err error) {

@@ -50,6 +50,7 @@ func New(ctx context.Context) (*Server, error) {
 	log.Println("migrasi: ok")
 
 	userRepo := repo.NewUserRepo(pool)
+	cashierRepo := repo.NewCashierRepo(pool)
 	refreshRepo := repo.NewRefreshRepo(pool)
 	categoryRepo := repo.NewCategoryRepo(pool)
 	productRepo := repo.NewProductRepo(pool)
@@ -57,8 +58,8 @@ func New(ctx context.Context) (*Server, error) {
 	trxRepo := repo.NewTrxRepo(pool)
 	storeRepo := repo.NewStoreRepo(pool)
 	reportRepo := repo.NewReportRepo(pool)
-	authSvc := service.NewAuthService(userRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
-	userSvc := service.NewUserService(userRepo)
+	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
+	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
 	trxSvc := service.NewTrxService(trxRepo)
 	settingsSvc := service.NewSettingsService(storeRepo, userRepo, reportRepo)

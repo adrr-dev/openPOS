@@ -46,7 +46,6 @@ func scanUser(row pgx.Row) (*model.User, error) {
 	return &u, nil
 }
 
-// GetByEmail mengambil user beserta nama tokonya.
 func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	u, err := scanUser(r.pool.QueryRow(ctx, `
 		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id WHERE u.email = $1
@@ -57,7 +56,6 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, e
 	return u, nil
 }
 
-// GetByID mengambil user beserta nama tokonya.
 func (r *UserRepo) GetByID(ctx context.Context, id string) (*model.User, error) {
 	u, err := scanUser(r.pool.QueryRow(ctx, `
 		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id WHERE u.id = $1
@@ -68,7 +66,6 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (*model.User, error) 
 	return u, nil
 }
 
-// ListByStore mengambil seluruh user dalam satu toko (tertua lebih dulu).
 func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.User, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id
@@ -81,31 +78,15 @@ func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.Us
 
 	var out []*model.User
 	for rows.Next() {
-		var u model.User
-		if err := rows.Scan(&u.ID, &u.StoreID, &u.Email, &u.Name, &u.PasswordHash, &u.PasscodeHash,
-			&u.Role, &u.Active, &u.CreatedAt, &u.StoreName); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, &u)
+		out = append(out, u)
 	}
 	return out, rows.Err()
 }
 
-// CreateCashier membuat akun kasir baru dalam satu toko.
-func (r *UserRepo) CreateCashier(ctx context.Context, storeID, email, name, passwordHash string) (*model.User, error) {
-	var id string
-	err := r.pool.QueryRow(ctx, `
-		INSERT INTO users (store_id, email, name, password_hash, role, active)
-		VALUES ($1, $2, $3, $4, 'cashier', TRUE)
-		RETURNING id
-	`, storeID, email, name, passwordHash).Scan(&id)
-	if err != nil {
-		return nil, mapDBErr(err)
-	}
-	return r.GetByID(ctx, id)
-}
-
-// SetActive mengubah status aktif/nonaktif akun.
 func (r *UserRepo) SetActive(ctx context.Context, id string, active bool) error {
 	ct, err := r.pool.Exec(ctx, `UPDATE users SET active = $2 WHERE id = $1`, id, active)
 	if err != nil {
@@ -117,7 +98,17 @@ func (r *UserRepo) SetActive(ctx context.Context, id string, active bool) error 
 	return nil
 }
 
-// RegisterTx membuat store + akun admin sekaligus dalam satu transaksi.
+func (r *UserRepo) SetPasscode(ctx context.Context, id string, hash *string) error {
+	ct, err := r.pool.Exec(ctx, `UPDATE users SET passcode_hash = $2 WHERE id = $1`, id, hash)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *UserRepo) RegisterTx(ctx context.Context, storeName, email, name, passwordHash string) (*model.User, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -143,8 +134,8 @@ func (r *UserRepo) RegisterTx(ctx context.Context, storeName, email, name, passw
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO users (id, store_id, email, name, password_hash, role, active)
-		VALUES ($1, $2, $3, $4, $5, $6, TRUE)
-	`, u.ID, u.StoreID, u.Email, u.Name, u.PasswordHash, string(u.Role)); err != nil {
+		VALUES ($1, $2, $3, $4, $5, 'admin', TRUE)
+	`, u.ID, u.StoreID, u.Email, u.Name, u.PasswordHash); err != nil {
 		return nil, mapDBErr(err)
 	}
 

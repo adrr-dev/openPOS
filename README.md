@@ -220,14 +220,12 @@ Mendapatkan daftar seluruh akun staff/kasir yang terdaftar di dalam toko saat in
   ```
 
 #### `POST /users`
-Membuat akun staff kasir baru dalam toko.
+Membuat akun staff kasir baru dalam toko. Kasir tidak memerlukan email atau password, cukup nama.
 * **Autentikasi:** Bearer Token (Hanya Admin)
 * **Request Expected:**
   ```json
   {
-    "name": "Andi Kasir",
-    "email": "andi@tokosaya.com",
-    "password": "kasirpassword123"
+    "name": "Andi Kasir"
   }
   ```
 * **Response Sukses (`201 Created`):**
@@ -235,7 +233,7 @@ Membuat akun staff kasir baru dalam toko.
   {
     "user": {
       "id": "b3e211da-e0c1-4b13-aa8d-8eb99a4e69bb",
-      "email": "andi@tokosaya.com",
+      "email": "",
       "name": "Andi Kasir",
       "role": "cashier",
       "active": true,

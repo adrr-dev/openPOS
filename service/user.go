@@ -18,70 +18,106 @@ var (
 )
 
 type UserService struct {
-	users *repo.UserRepo
+	users    *repo.UserRepo
+	cashiers *repo.CashierRepo
 }
 
-func NewUserService(users *repo.UserRepo) *UserService { return &UserService{users: users} }
+func NewUserService(users *repo.UserRepo, cashiers *repo.CashierRepo) *UserService {
+	return &UserService{users: users, cashiers: cashiers}
+}
 
-// List mengembalikan seluruh akun dalam satu toko.
+// List mengembalikan seluruh akun dalam satu toko (Admin + Cashiers).
 func (s *UserService) List(ctx context.Context, storeID string) ([]model.PublicUser, error) {
-	users, err := s.users.ListByStore(ctx, storeID)
+	owners, err := s.users.ListByStore(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]model.PublicUser, 0, len(users))
-	for _, u := range users {
+	cashiers, err := s.cashiers.ListByStore(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]model.PublicUser, 0, len(owners)+len(cashiers))
+	for _, u := range owners {
 		out = append(out, u.Public())
+	}
+	storeName := ""
+	if len(owners) > 0 {
+		storeName = owners[0].StoreName
+	}
+	for _, c := range cashiers {
+		out = append(out, c.Public(storeName))
 	}
 	return out, nil
 }
 
-// CreateCashier membuat akun kasir baru di toko admin (FR-USR-001).
-func (s *UserService) CreateCashier(ctx context.Context, storeID, name, email, password string) (*model.PublicUser, error) {
+// CreateCashier membuat akun kasir baru di toko admin (hanya butuh nama).
+func (s *UserService) CreateCashier(ctx context.Context, storeID, name string) (*model.PublicUser, error) {
 	name = strings.TrimSpace(name)
-	email = strings.ToLower(strings.TrimSpace(email))
-
 	if name == "" {
 		return nil, fmt.Errorf("nama wajib diisi")
 	}
-	if !isEmail(email) {
-		return nil, fmt.Errorf("format email tidak valid")
-	}
-	if len(password) < 8 {
-		return nil, fmt.Errorf("kata sandi minimal 8 karakter")
-	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	c, err := s.cashiers.Create(ctx, storeID, name)
 	if err != nil {
 		return nil, err
 	}
-
-	u, err := s.users.CreateCashier(ctx, storeID, email, name, string(hash))
-	if err != nil {
-		if errors.Is(err, repo.ErrDuplicate) {
-			return nil, ErrEmailTaken
-		}
-		return nil, err
+	owners, _ := s.users.ListByStore(ctx, storeID)
+	storeName := ""
+	if len(owners) > 0 {
+		storeName = owners[0].StoreName
 	}
-	p := u.Public()
-	return &p, nil
+	pub := c.Public(storeName)
+	return &pub, nil
 }
 
 // SetActive menonaktifkan/mengaktifkan akun kasir dalam toko yang sama.
-// Akun admin tidak boleh diubah dari endpoint ini (FR-USR-004).
-func (s *UserService) SetActive(ctx context.Context, storeID, targetUserID string, active bool) error {
-	u, err := s.users.GetByID(ctx, targetUserID)
+func (s *UserService) SetActive(ctx context.Context, storeID, targetID string, active bool) error {
+	c, err := s.cashiers.GetByID(ctx, targetID)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
 			return ErrStoreMismatch
 		}
 		return err
 	}
-	if u.StoreID != storeID {
+	if c.StoreID != storeID {
 		return ErrStoreMismatch
 	}
-	if u.Role != model.RoleCashier {
-		return ErrNotEditable
+	return s.cashiers.SetActive(ctx, targetID, active)
+}
+
+// SetPasscode mengatur passcode untuk admin atau kasir.
+func (s *UserService) SetPasscode(ctx context.Context, storeID, targetID, passcode string) error {
+	passcode = strings.TrimSpace(passcode)
+	var hash *string
+	if passcode != "" {
+		if len(passcode) != 5 {
+			return fmt.Errorf("passcode harus 5 angka")
+		}
+		for _, ch := range passcode {
+			if ch < '0' || ch > '9' {
+				return fmt.Errorf("passcode harus 5 angka")
+			}
+		}
+		h, err := bcrypt.GenerateFromPassword([]byte(passcode), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		hs := string(h)
+		hash = &hs
 	}
-	return s.users.SetActive(ctx, targetUserID, active)
+
+	// Cek apakah target adalah kasir
+	c, err := s.cashiers.GetByID(ctx, targetID)
+	if err == nil && c.StoreID == storeID {
+		return s.cashiers.SetPasscode(ctx, targetID, hash)
+	}
+
+	// Cek apakah target adalah admin (owner)
+	owner, err := s.users.GetByID(ctx, targetID)
+	if err == nil && owner.StoreID == storeID {
+		return s.users.SetPasscode(ctx, targetID, hash)
+	}
+
+	return ErrStoreMismatch
 }
