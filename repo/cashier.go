@@ -87,3 +87,18 @@ func (r *CashierRepo) SetPasscode(ctx context.Context, id string, hash *string) 
 	}
 	return nil
 }
+
+func (r *CashierRepo) GetOrCreateDefault(ctx context.Context, storeID, defaultName string) (string, error) {
+	var id string
+	err := r.pool.QueryRow(ctx, `
+		SELECT id FROM cashiers WHERE store_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, storeID).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	c, err := r.Create(ctx, storeID, defaultName)
+	if err != nil {
+		return "", err
+	}
+	return c.ID, nil
+}

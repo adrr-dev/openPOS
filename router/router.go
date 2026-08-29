@@ -61,8 +61,8 @@ func New(ctx context.Context) (*Server, error) {
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
-	trxSvc := service.NewTrxService(trxRepo)
-	settingsSvc := service.NewSettingsService(storeRepo, userRepo, reportRepo)
+	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
+	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)

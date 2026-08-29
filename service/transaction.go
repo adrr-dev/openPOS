@@ -8,10 +8,13 @@ import (
 )
 
 type TrxService struct {
-	trx *repo.TrxRepo
+	trx      *repo.TrxRepo
+	cashiers *repo.CashierRepo
 }
 
-func NewTrxService(trx *repo.TrxRepo) *TrxService { return &TrxService{trx: trx} }
+func NewTrxService(trx *repo.TrxRepo, cashiers *repo.CashierRepo) *TrxService {
+	return &TrxService{trx: trx, cashiers: cashiers}
+}
 
 type CheckoutCmd struct {
 	Items    []CheckoutItemCmd
@@ -26,7 +29,28 @@ type CheckoutItemCmd struct {
 	Qty       int
 }
 
-func (s *TrxService) Checkout(ctx context.Context, storeID, cashierID, cashierName string, cmd CheckoutCmd) (*model.Trx, error) {
+func (s *TrxService) Checkout(ctx context.Context, storeID string, actingAsCashierID *string, fallbackName string, cmd CheckoutCmd) (*model.Trx, error) {
+	cashierID := ""
+	cashierName := fallbackName
+
+	if actingAsCashierID != nil {
+		cashierID = *actingAsCashierID
+		c, err := s.cashiers.GetByID(ctx, cashierID)
+		if err == nil {
+			cashierName = c.Name
+		}
+	} else {
+		defID, err := s.cashiers.GetOrCreateDefault(ctx, storeID, fallbackName)
+		if err != nil {
+			return nil, err
+		}
+		cashierID = defID
+		c, err := s.cashiers.GetByID(ctx, cashierID)
+		if err == nil {
+			cashierName = c.Name
+		}
+	}
+
 	items := make([]repo.CheckoutItem, len(cmd.Items))
 	for i, it := range cmd.Items {
 		items[i] = repo.CheckoutItem{ProductID: it.ProductID, Qty: it.Qty}

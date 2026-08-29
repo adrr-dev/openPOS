@@ -14,13 +14,14 @@ import (
 )
 
 type SettingsService struct {
-	stores  *repo.StoreRepo
-	users   *repo.UserRepo
-	reports *repo.ReportRepo
+	stores   *repo.StoreRepo
+	users    *repo.UserRepo
+	cashiers *repo.CashierRepo
+	reports  *repo.ReportRepo
 }
 
-func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, reports *repo.ReportRepo) *SettingsService {
-	return &SettingsService{stores: stores, users: users, reports: reports}
+func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, cashiers *repo.CashierRepo, reports *repo.ReportRepo) *SettingsService {
+	return &SettingsService{stores: stores, users: users, cashiers: cashiers, reports: reports}
 }
 
 func (s *SettingsService) Get(ctx context.Context, storeID string) (*model.StoreSettings, error) {
@@ -49,12 +50,8 @@ func (s *SettingsService) Update(ctx context.Context, storeID string, in *model.
 }
 
 // SetPasscode: hash 5 digit; string kosong = hapus passcode.
-// Admin dapat mengatur akun mana pun dalam tokonya.
-func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetUserID, passcode string) error {
-	target, err := s.users.GetByID(ctx, targetUserID)
-	if err != nil || target.StoreID != storeID {
-		return ErrStoreMismatch
-	}
+// Admin dapat mengatur akun mana pun (admin atau kasir) dalam tokonya.
+func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID, passcode string) error {
 	passcode = strings.TrimSpace(passcode)
 	var hash *string
 	if passcode != "" {
@@ -73,11 +70,20 @@ func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetUserID
 		hs := string(h)
 		hash = &hs
 	}
-	err = s.stores.SetPasscode(ctx, storeID, targetUserID, hash)
-	if err == repo.ErrNotFound {
-		return ErrStoreMismatch
+
+	// Cek apakah target adalah kasir
+	c, err := s.cashiers.GetByID(ctx, targetID)
+	if err == nil && c.StoreID == storeID {
+		return s.cashiers.SetPasscode(ctx, targetID, hash)
 	}
-	return err
+
+	// Cek apakah target adalah admin (owner)
+	owner, err := s.users.GetByID(ctx, targetID)
+	if err == nil && owner.StoreID == storeID {
+		return s.users.SetPasscode(ctx, targetID, hash)
+	}
+
+	return ErrStoreMismatch
 }
 
 func (s *SettingsService) Dashboard(ctx context.Context, storeID, cashierID string, cashierView bool) (any, error) {
