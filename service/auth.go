@@ -80,9 +80,6 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 		return nil, nil, err
 	}
 
-	// Buat default cashier untuk owner agar transaksi langsung bisa dicatat
-	_, _ = s.cashiers.Create(ctx, user.StoreID, name)
-
 	pair, err := s.issueTokens(ctx, user.ID, nil)
 	if err != nil {
 		return nil, nil, err
