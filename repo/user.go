@@ -133,8 +133,8 @@ func (r *UserRepo) RegisterTx(ctx context.Context, storeName, email, name, passw
 		Active:       true,
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO users (id, store_id, email, name, password_hash, role, active)
-		VALUES ($1, $2, $3, $4, $5, 'admin', TRUE)
+		INSERT INTO users (id, store_id, email, name, password_hash, role, active, email_verified_at)
+		VALUES ($1, $2, $3, $4, $5, 'admin', TRUE, now())
 	`, u.ID, u.StoreID, u.Email, u.Name, u.PasswordHash); err != nil {
 		return nil, mapDBErr(err)
 	}

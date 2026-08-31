@@ -52,13 +52,14 @@ func New(ctx context.Context) (*Server, error) {
 	userRepo := repo.NewUserRepo(pool)
 	cashierRepo := repo.NewCashierRepo(pool)
 	refreshRepo := repo.NewRefreshRepo(pool)
+	otpRepo := repo.NewOtpRepo(pool)
 	categoryRepo := repo.NewCategoryRepo(pool)
 	productRepo := repo.NewProductRepo(pool)
 	movementRepo := repo.NewMovementRepo(pool)
 	trxRepo := repo.NewTrxRepo(pool)
 	storeRepo := repo.NewStoreRepo(pool)
 	reportRepo := repo.NewReportRepo(pool)
-	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
+	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
 	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
@@ -93,6 +94,8 @@ func New(ctx context.Context) (*Server, error) {
 		r.Post("/auth/login", authH.Login)
 		r.Post("/auth/refresh", authH.Refresh)
 		r.Post("/auth/logout", authH.Logout)
+		r.Post("/auth/otp/send", authH.SendOTP)
+		r.Post("/auth/otp/verify", authH.VerifyOTP)
 
 		// butuh access token
 		r.Group(func(r chi.Router) {

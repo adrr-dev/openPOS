@@ -24,6 +24,15 @@ type registerReq struct {
 	StoreName string `json:"storeName"`
 }
 
+type otpSendReq struct {
+	Email string `json:"email"`
+}
+
+type otpVerifyReq struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
+}
+
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -46,6 +55,38 @@ type switchReq struct {
 type authResponse struct {
 	User model.PublicUser `json:"user"`
 	model.TokenPair
+}
+
+// SendOTP mengirim kode OTP 6 digit ke email.
+// POST /api/v1/auth/otp/send
+func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
+	var req otpSendReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+		return
+	}
+	err := h.auth.SendOTP(r.Context(), req.Email)
+	if err != nil {
+		respondOTPErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Kode OTP terkirim ke email Anda."})
+}
+
+// VerifyOTP memverifikasi kode OTP.
+// POST /api/v1/auth/otp/verify
+func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
+	var req otpVerifyReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+		return
+	}
+	err := h.auth.VerifyOTP(r.Context(), req.Email, req.Code)
+	if err != nil {
+		respondOTPErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"verified": true, "message": "Email berhasil diverifikasi."})
 }
 
 // Register membuat Store + akun Admin sekaligus, lalu langsung login.
@@ -155,6 +196,23 @@ func respondSwitchErr(w http.ResponseWriter, err error) {
 	}
 }
 
+func respondOTPErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrInvalidEmail):
+		writeError(w, http.StatusBadRequest, "Email tidak valid.")
+	case errors.Is(err, service.ErrOtpCooldown):
+		writeError(w, http.StatusTooManyRequests, "Terlalu sering meminta kode. Coba lagi dalam 60 detik.")
+	case errors.Is(err, service.ErrOtpWrong):
+		writeError(w, http.StatusBadRequest, "Kode OTP salah.")
+	case errors.Is(err, service.ErrOtpExpired):
+		writeError(w, http.StatusGone, "Kode OTP sudah kedaluwarsa. Kirim ulang.")
+	case errors.Is(err, service.ErrOtpMaxAttempts):
+		writeError(w, http.StatusTooManyRequests, "Terlalu banyak percobaan. Kirim ulang kode OTP.")
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}
+
 func respondAuthErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrPasscodeRequired):
@@ -165,6 +223,8 @@ func respondAuthErr(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnauthorized, "Email atau kata sandi tidak cocok. Coba lagi.")
 	case errors.Is(err, service.ErrEmailTaken):
 		writeError(w, http.StatusConflict, "Email sudah terdaftar. Silakan masuk.")
+	case errors.Is(err, service.ErrEmailNotVerified):
+		writeError(w, http.StatusBadRequest, "Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
 	case errors.Is(err, service.ErrAccountInactive):
 		writeError(w, http.StatusForbidden, "Akun dinonaktifkan. Hubungi admin toko.")
 	default:

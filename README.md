@@ -65,8 +65,49 @@ Mengecek status kesehatan aplikasi, koneksi database, dan konektivitas API.
 
 ### 🔑 Autentikasi (Authentication)
 
+#### `POST /auth/otp/send`
+Mengirim kode OTP 6 digit ke alamat email pengguna (Gmail SMTP) untuk verifikasi awal pendaftaran akun.
+* **Autentikasi:** Publik (Tanpa token)
+* **Request Expected:**
+  ```json
+  {
+    "email": "sari@tokosaya.com"
+  }
+  ```
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Kode OTP terkirim ke email Anda."
+  }
+  ```
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "Email tidak valid."}`
+  * `429 Too Many Requests` — `{"error": "Terlalu sering meminta kode. Coba lagi dalam 60 detik."}`
+
+#### `POST /auth/otp/verify`
+Memverifikasi 6 digit kode OTP yang dikirimkan ke email. Sukses menandai email terverifikasi sehingga diizinkan untuk mendaftar akun.
+* **Autentikasi:** Publik (Tanpa token)
+* **Request Expected:**
+  ```json
+  {
+    "email": "sari@tokosaya.com",
+    "code": "482913"
+  }
+  ```
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "verified": true,
+    "message": "Email berhasil diverifikasi."
+  }
+  ```
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "Kode OTP salah."}`
+  * `410 Gone` — `{"error": "Kode OTP sudah kedaluwarsa. Kirim ulang."}`
+  * `429 Too Many Requests` — `{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."}`
+
 #### `POST /auth/register`
-Mendaftarkan Toko (Store) baru sekaligus membuat akun Admin pertama untuk toko tersebut, lalu otomatis login (mengembalikan token).
+Mendaftarkan Toko (Store) baru sekaligus membuat akun Admin pertama untuk toko tersebut (Memerlukan email yang sudah diverifikasi OTP sebelumnya), lalu otomatis login (mengembalikan token).
 * **Autentikasi:** Publik (Tanpa token)
 * **Request Expected:**
   ```json
@@ -95,6 +136,7 @@ Mendaftarkan Toko (Store) baru sekaligus membuat akun Admin pertama untuk toko t
   ```
 * **Expected Errors:**
   * `400 Bad Request` — Validasi gagal (misal: email kosong/tidak valid, password kurang dari 8 karakter).
+  * `400 Bad Request` — `{"error": "Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu."}`
   * `409 Conflict` — `{"error": "Email sudah terdaftar. Silakan masuk."}`
 
 #### `POST /auth/login`
@@ -811,6 +853,10 @@ Isi file konfigurasi `.env` sebelum menjalankan aplikasi:
 | `ACCESS_TTL_MINUTES` | Tidak | `15` | Masa kadaluwarsa Access Token (Menit). |
 | `REFRESH_TTL_DAYS` | Tidak | `7` | Masa kadaluwarsa Refresh Token (Hari). |
 | `CORS_ORIGINS` | Tidak | `http://localhost:5173` | Daftar asal URL frontend yang diijinkan (pisah koma). |
+| `SMTP_HOST` | Tidak | `smtp.gmail.com` | Host server SMTP Gmail untuk pengiriman OTP. |
+| `SMTP_PORT` | Tidak | `587` | Port server SMTP Gmail. |
+| `SMTP_EMAIL` | Tidak | — | Alamat email pengirim (Gmail). |
+| `SMTP_PASSWORD` | Tidak | — | App Password email Gmail. |
 
 ---
 

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/0xMinomus/openPOS/backend/service"
 )
 
 func TestAPIIntegrationFlow(t *testing.T) {
@@ -41,10 +43,32 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		return w, respMap
 	}
 
-	// 1. Register Admin + Store
+	// 1. Send OTP, Verify OTP, Register Admin + Store
+	email := "admin_" + time.Now().Format("20060102150405") + "@tokosaya.com"
+	var lastCode string
+	service.TestOnOTPSent = func(e, c string) {
+		if e == email {
+			lastCode = c
+		}
+	}
+
+	w, _ := doReq("POST", "/auth/otp/send", map[string]string{"email": email}, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("SendOTP failed: code=%d, body=%s", w.Code, w.Body.String())
+	}
+
+	if lastCode == "" {
+		t.Fatalf("OTP code was not captured")
+	}
+
+	w, _ = doReq("POST", "/auth/otp/verify", map[string]string{"email": email, "code": lastCode}, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("VerifyOTP failed: code=%d, body=%s", w.Code, w.Body.String())
+	}
+
 	regBody := map[string]string{
 		"name":      "Admin Toko",
-		"email":     "admin_" + time.Now().Format("20060102150405") + "@tokosaya.com",
+		"email":     email,
 		"password":  "password123",
 		"storeName": "Toko Berkah",
 	}

@@ -7,6 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
+	"math/big"
+	"net/smtp"
+	"os"
 	"strings"
 	"time"
 
@@ -25,22 +29,32 @@ var (
 	ErrAccountInactive    = errors.New("akun dinonaktifkan")
 	ErrTokenInvalid       = errors.New("sesi tidak valid, silakan masuk kembali")
 	ErrSwitchSelf         = errors.New("tidak dapat beralih ke akun sendiri")
+	ErrInvalidEmail       = errors.New("Email tidak valid.")
+	ErrOtpCooldown        = errors.New("Terlalu sering meminta kode. Coba lagi dalam 60 detik.")
+	ErrOtpWrong           = errors.New("Kode OTP salah.")
+	ErrOtpExpired         = errors.New("Kode OTP sudah kedaluwarsa. Kirim ulang.")
+	ErrOtpMaxAttempts     = errors.New("Terlalu banyak percobaan. Kirim ulang kode OTP.")
+	ErrEmailNotVerified   = errors.New("Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
 )
 
+var TestOnOTPSent func(email, code string)
+
 type AuthService struct {
-	users     *repo.UserRepo
-	cashiers  *repo.CashierRepo
-	refresh   *repo.RefreshRepo
-	jwtSecret []byte
-	accessTTL time.Duration
+	users      *repo.UserRepo
+	cashiers   *repo.CashierRepo
+	refresh    *repo.RefreshRepo
+	otps       *repo.OtpRepo
+	jwtSecret  []byte
+	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
+func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, otps *repo.OtpRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
 	return &AuthService{
 		users:      users,
 		cashiers:   cashiers,
 		refresh:    refresh,
+		otps:       otps,
 		jwtSecret:  []byte(jwtSecret),
 		accessTTL:  accessTTL,
 		refreshTTL: refreshTTL,
@@ -48,6 +62,121 @@ func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *r
 }
 
 // ── register ─────────────────────────────────────────────────────────
+
+func (s *AuthService) SendOTP(ctx context.Context, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !isEmail(email) {
+		return ErrInvalidEmail
+	}
+
+	existing, err := s.otps.GetOTP(ctx, email)
+	if err == nil && existing != nil {
+		if time.Since(existing.LastSentAt) < 60*time.Second {
+			return ErrOtpCooldown
+		}
+	}
+
+	code, err := generate6DigitOTP()
+	if err != nil {
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	expiresAt := time.Now().Add(10 * time.Minute)
+	if err := s.otps.UpsertOTP(ctx, email, string(hash), expiresAt); err != nil {
+		return err
+	}
+
+	if TestOnOTPSent != nil {
+		TestOnOTPSent(email, code)
+	}
+
+	if err := sendOTPEmail(email, code); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *AuthService) VerifyOTP(ctx context.Context, email, code string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	code = strings.TrimSpace(code)
+
+	o, err := s.otps.GetOTP(ctx, email)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return ErrOtpWrong
+		}
+		return err
+	}
+
+	if o.Attempts >= 3 {
+		return ErrOtpMaxAttempts
+	}
+
+	if time.Now().After(o.ExpiresAt) {
+		return ErrOtpExpired
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(o.CodeHash), []byte(code)) != nil {
+		attempts, _ := s.otps.IncrementAttempts(ctx, email)
+		if attempts >= 3 {
+			return ErrOtpMaxAttempts
+		}
+		return ErrOtpWrong
+	}
+
+	if err := s.otps.MarkVerified(ctx, email); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generate6DigitOTP() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(900000))
+	if err != nil {
+		return "", err
+	}
+	val := n.Int64() + 100000
+	return fmt.Sprintf("%d", val), nil
+}
+
+func sendOTPEmail(toEmail, otpCode string) error {
+	host := getEnv("SMTP_HOST", "smtp.gmail.com")
+	port := getEnv("SMTP_PORT", "587")
+	user := getEnv("SMTP_EMAIL", getEnv("SMTP_USER", ""))
+	pass := getEnv("SMTP_PASSWORD", getEnv("SMTP_PASS", ""))
+	from := getEnv("SMTP_FROM", user)
+
+	subject := "Kode Verifikasi OTP OpenPOS"
+	body := fmt.Sprintf("Halo,\n\nKode verifikasi OTP OpenPOS Anda adalah: %s\n\nKode ini berlaku selama 10 menit. Jangan berikan kode ini kepada siapa pun.\n\nSalam,\nTim OpenPOS", otpCode)
+
+	msg := "From: " + from + "\r\n" +
+		"To: " + toEmail + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
+		body
+
+	if user == "" || pass == "" {
+		log.Printf("[DEV/MOCK EMAIL] To: %s | OTP Code: %s", toEmail, otpCode)
+		return nil
+	}
+
+	auth := smtp.PlainAuth("", user, pass, host)
+	addr := host + ":" + port
+	err := smtp.SendMail(addr, auth, from, []string{toEmail}, []byte(msg))
+	if err != nil {
+		log.Printf("[SMTP ERROR] Failed to send email to %s: %v. OTP was: %s", toEmail, err, otpCode)
+		return err
+	}
+	return nil
+}
 
 func (s *AuthService) Register(ctx context.Context, name, email, password, storeName string) (*model.User, *model.TokenPair, error) {
 	name = strings.TrimSpace(name)
@@ -58,13 +187,18 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 		return nil, nil, fmt.Errorf("nama wajib diisi")
 	}
 	if !isEmail(email) {
-		return nil, nil, fmt.Errorf("format email tidak valid")
+		return nil, nil, ErrInvalidEmail
 	}
 	if len(password) < 8 {
 		return nil, nil, fmt.Errorf("kata sandi minimal 8 karakter")
 	}
 	if storeName == "" {
 		return nil, nil, fmt.Errorf("nama toko wajib diisi")
+	}
+
+	verified, err := s.otps.IsEmailVerified(ctx, email)
+	if err != nil || !verified {
+		return nil, nil, ErrEmailNotVerified
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -345,4 +479,11 @@ func hashToken(raw string) string {
 func isEmail(s string) bool {
 	at := strings.IndexByte(s, '@')
 	return at > 0 && at < len(s)-1 && strings.Contains(s[at:], ".") && !strings.ContainsAny(s, " \t")
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
