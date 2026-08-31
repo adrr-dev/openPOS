@@ -208,6 +208,8 @@ func respondOTPErr(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusGone, "Kode OTP sudah kedaluwarsa. Kirim ulang.")
 	case errors.Is(err, service.ErrOtpMaxAttempts):
 		writeError(w, http.StatusTooManyRequests, "Terlalu banyak percobaan. Kirim ulang kode OTP.")
+	case errors.Is(err, service.ErrEmailTaken):
+		writeError(w, http.StatusConflict, "Email sudah terdaftar. Silakan masuk.")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}

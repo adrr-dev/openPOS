@@ -83,6 +83,12 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		t.Fatalf("store_id is empty")
 	}
 
+	// Test sending OTP for already registered email -> should return 409 Conflict
+	w, _ = doReq("POST", "/auth/otp/send", map[string]string{"email": email}, "")
+	if w.Code != http.StatusConflict {
+		t.Fatalf("Expected 409 Conflict for registered email OTP send, got code=%d, body=%s", w.Code, w.Body.String())
+	}
+
 	// 2. GET /auth/me
 	w, resp = doReq("GET", "/auth/me", nil, token)
 	if w.Code != http.StatusOK {
