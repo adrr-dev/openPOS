@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -53,6 +54,11 @@ func Connect(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
+		// All auto timestamps in UTC: sqlite compares datetimes
+		// lexicographically, so a single offset keeps range filters
+		// (dashboard/reports "today") chronological. Postgres stores
+		// the same instants as timestamptz either way.
+		NowFunc: func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gagal terhubung ke database via GORM: %w", err)

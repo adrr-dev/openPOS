@@ -46,7 +46,11 @@ func (s *CatalogService) CreateCategory(ctx context.Context, storeID uint, name 
 }
 
 func (s *CatalogService) DeleteCategory(ctx context.Context, storeID, id uint) (soft bool, err error) {
-	return s.cats.Delete(ctx, storeID, id)
+	soft, err = s.cats.Delete(ctx, storeID, id)
+	if errors.Is(err, repo.ErrNotFound) {
+		return false, ErrStoreMismatch
+	}
+	return soft, err
 }
 
 type ProductInput struct {
@@ -163,7 +167,11 @@ func (s *CatalogService) ListProducts(ctx context.Context, storeID uint, f repo.
 }
 
 func (s *CatalogService) GetProduct(ctx context.Context, storeID, id uint) (*model.Product, error) {
-	return s.prods.GetByID(ctx, storeID, id)
+	p, err := s.prods.GetByID(ctx, storeID, id)
+	if errors.Is(err, repo.ErrNotFound) {
+		return nil, ErrStoreMismatch
+	}
+	return p, err
 }
 
 func (s *CatalogService) SetProductActive(ctx context.Context, storeID, id uint, active bool) error {
