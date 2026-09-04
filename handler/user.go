@@ -51,12 +51,16 @@ func (h *UserHandler) Create(c *gin.Context) {
 
 func (h *UserHandler) SetActive(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
 	var req setActiveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	if err := h.svc.SetActive(c.Request.Context(), claims.StoreID, c.Param("id"), req.Active); err != nil {
+	if err := h.svc.SetActive(c.Request.Context(), claims.StoreID, id, req.Active); err != nil {
 		respondUserErr(c, err)
 		return
 	}

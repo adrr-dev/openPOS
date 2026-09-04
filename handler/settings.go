@@ -70,16 +70,23 @@ func (h *SettingsHandler) Update(c *gin.Context) {
 
 type passcodeReq struct {
 	Passcode string `json:"passcode"`
+	// Role disambiguates owner vs cashier accounts sharing one number
+	// ("admin"/"cashier", optional — legacy cashier-first order when empty).
+	Role string `json:"role"`
 }
 
 func (h *SettingsHandler) SetPasscode(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
 	var req passcodeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	if err := h.svc.SetPasscode(c.Request.Context(), claims.StoreID, c.Param("id"), req.Passcode); err != nil {
+	if err := h.svc.SetPasscode(c.Request.Context(), claims.StoreID, id, req.Passcode, req.Role); err != nil {
 		switch {
 		case errors.Is(err, service.ErrStoreMismatch), errors.Is(err, repo.ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "Akun tidak ditemukan di toko Anda."})
@@ -97,7 +104,12 @@ func (h *SettingsHandler) SetPasscode(c *gin.Context) {
 
 func (h *SettingsHandler) Dashboard(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
-	data, err := h.svc.Dashboard(c.Request.Context(), claims.StoreID, claims.UserID, claims.Role != model.RoleAdmin)
+	// Cashiers must be scoped to their own cashier ID, not the owner ID.
+	cashierID := claims.UserID
+	if claims.ActingAsCashierID != nil {
+		cashierID = *claims.ActingAsCashierID
+	}
+	data, err := h.svc.Dashboard(c.Request.Context(), claims.StoreID, cashierID, claims.Role != model.RoleAdmin)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat dashboard."})
 		return

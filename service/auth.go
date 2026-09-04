@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/smtp"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -317,37 +318,60 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
 	_ = s.refresh.Revoke(ctx, hashToken(refreshToken))
 }
 
-func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, passcode string) (*model.PublicUser, *model.TokenPair, error) {
-	currentActiveID := claims.UserID
-	if claims.ActingAsCashierID != nil {
-		currentActiveID = *claims.ActingAsCashierID
-	}
-	if currentActiveID == targetID {
-		return nil, nil, ErrSwitchSelf
-	}
-
+func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint, passcode string) (*model.PublicUser, *model.TokenPair, error) {
 	owner, err := s.users.GetByID(ctx, claims.UserID)
 	if err != nil || !owner.Active {
 		return nil, nil, ErrTokenInvalid
 	}
 
-	if targetID == owner.ID {
-		if owner.PasscodeHash != nil && *owner.PasscodeHash != "" {
-			if passcode == "" {
-				return nil, nil, ErrPasscodeRequired
-			}
-			if bcrypt.CompareHashAndPassword([]byte(*owner.PasscodeHash), []byte(passcode)) != nil {
-				return nil, nil, ErrPasscodeWrong
-			}
+	// NOTE: users and cashiers live in separate tables with independent
+	// numeric sequences, so an owner and a cashier can share the same number
+	// (e.g. both id 1). Disambiguate by session state, never by number alone.
+	if claims.ActingAsCashierID != nil {
+		if targetID == *claims.ActingAsCashierID {
+			return nil, nil, ErrSwitchSelf
 		}
-		pair, err := s.issueTokens(ctx, owner.ID, nil)
+		if targetID == owner.ID {
+			return s.switchToOwner(ctx, owner, passcode)
+		}
+		return s.switchToCashier(ctx, owner, targetID, passcode)
+	}
+
+	// Acting as admin: a cashier wins ties (it is the only reachable
+	// interpretation that isn't "self"); self-switch stays 400 like before.
+	if c, err := s.cashiers.GetByID(ctx, targetID); err == nil && c.StoreID == owner.StoreID {
+		if !c.Active {
+			return nil, nil, ErrAccountInactive
+		}
+		if err := checkPasscode(c.PasscodeHash, passcode); err != nil {
+			return nil, nil, err
+		}
+		pair, err := s.issueTokens(ctx, owner.ID, &c.ID)
 		if err != nil {
 			return nil, nil, err
 		}
-		pub := owner.Public()
+		pub := c.Public(owner.StoreName)
 		return &pub, pair, nil
 	}
+	if targetID == owner.ID {
+		return nil, nil, ErrSwitchSelf
+	}
+	return nil, nil, repo.ErrNotFound
+}
 
+func (s *AuthService) switchToOwner(ctx context.Context, owner *model.User, passcode string) (*model.PublicUser, *model.TokenPair, error) {
+	if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
+		return nil, nil, err
+	}
+	pair, err := s.issueTokens(ctx, owner.ID, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	pub := owner.Public()
+	return &pub, pair, nil
+}
+
+func (s *AuthService) switchToCashier(ctx context.Context, owner *model.User, targetID uint, passcode string) (*model.PublicUser, *model.TokenPair, error) {
 	cashier, err := s.cashiers.GetByID(ctx, targetID)
 	if err != nil {
 		return nil, nil, repo.ErrNotFound
@@ -358,16 +382,9 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, pass
 	if !cashier.Active {
 		return nil, nil, ErrAccountInactive
 	}
-
-	if cashier.PasscodeHash != nil && *cashier.PasscodeHash != "" {
-		if passcode == "" {
-			return nil, nil, ErrPasscodeRequired
-		}
-		if bcrypt.CompareHashAndPassword([]byte(*cashier.PasscodeHash), []byte(passcode)) != nil {
-			return nil, nil, ErrPasscodeWrong
-		}
+	if err := checkPasscode(cashier.PasscodeHash, passcode); err != nil {
+		return nil, nil, err
 	}
-
 	pair, err := s.issueTokens(ctx, owner.ID, &cashier.ID)
 	if err != nil {
 		return nil, nil, err
@@ -376,12 +393,25 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, pass
 	return &pub, pair, nil
 }
 
+func checkPasscode(hash *string, passcode string) error {
+	if hash == nil || *hash == "" {
+		return nil
+	}
+	if passcode == "" {
+		return ErrPasscodeRequired
+	}
+	if bcrypt.CompareHashAndPassword([]byte(*hash), []byte(passcode)) != nil {
+		return ErrPasscodeWrong
+	}
+	return nil
+}
+
 type Claims struct {
-	UserID            string
-	StoreID           string
+	UserID            uint
+	StoreID           uint
 	Name              string
 	Email             string
-	ActingAsCashierID *string
+	ActingAsCashierID *uint
 	Role              model.Role
 }
 
@@ -392,7 +422,7 @@ func (c *Claims) ActiveRole() model.Role {
 	return model.RoleAdmin
 }
 
-func (s *AuthService) issueTokens(ctx context.Context, ownerID string, actingAsCashierID *string) (*model.TokenPair, error) {
+func (s *AuthService) issueTokens(ctx context.Context, ownerID uint, actingAsCashierID *uint) (*model.TokenPair, error) {
 	owner, err := s.users.GetByID(ctx, ownerID)
 	if err != nil {
 		return nil, err
@@ -400,15 +430,15 @@ func (s *AuthService) issueTokens(ctx context.Context, ownerID string, actingAsC
 
 	now := time.Now()
 	mc := jwt.MapClaims{
-		"sub":   owner.ID,
-		"sid":   owner.StoreID,
+		"sub":   strconv.FormatUint(uint64(owner.ID), 10),
+		"sid":   strconv.FormatUint(uint64(owner.StoreID), 10),
 		"name":  owner.Name,
 		"email": owner.Email,
 		"iat":   now.Unix(),
 		"exp":   now.Add(s.accessTTL).Unix(),
 	}
 	if actingAsCashierID != nil {
-		mc["acting_as"] = *actingAsCashierID
+		mc["acting_as"] = strconv.FormatUint(uint64(*actingAsCashierID), 10)
 	}
 
 	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, mc).SignedString(s.jwtSecret)
@@ -451,16 +481,29 @@ func (s *AuthService) ParseAccess(tokenStr string) (*Claims, error) {
 	if sub == "" {
 		return nil, ErrTokenInvalid
 	}
+	uid, err := strconv.ParseUint(sub, 10, 64)
+	if err != nil {
+		return nil, ErrTokenInvalid
+	}
+	sidNum, err := strconv.ParseUint(sid, 10, 64)
+	if err != nil {
+		return nil, ErrTokenInvalid
+	}
 
 	c := &Claims{
-		UserID:  sub,
-		StoreID: sid,
+		UserID:  uint(uid),
+		StoreID: uint(sidNum),
 		Name:    name,
 		Email:   email,
 		Role:    model.RoleAdmin,
 	}
 	if actingAs != "" {
-		c.ActingAsCashierID = &actingAs
+		actingNum, err := strconv.ParseUint(actingAs, 10, 64)
+		if err != nil {
+			return nil, ErrTokenInvalid
+		}
+		actingID := uint(actingNum)
+		c.ActingAsCashierID = &actingID
 		c.Role = model.RoleCashier
 	}
 	return c, nil

@@ -30,7 +30,7 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, e
 	return &u, nil
 }
 
-func (r *UserRepo) GetByID(ctx context.Context, id string) (*model.User, error) {
+func (r *UserRepo) GetByID(ctx context.Context, id uint) (*model.User, error) {
 	var u model.User
 	var store model.Store
 
@@ -44,7 +44,7 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (*model.User, error) 
 	return &u, nil
 }
 
-func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.User, error) {
+func (r *UserRepo) ListByStore(ctx context.Context, storeID uint) ([]*model.User, error) {
 	users := make([]*model.User, 0)
 	var store model.Store
 	if err := r.db.WithContext(ctx).First(&store, "id = ?", storeID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -62,7 +62,7 @@ func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.Us
 	return users, nil
 }
 
-func (r *UserRepo) SetActive(ctx context.Context, id string, active bool) error {
+func (r *UserRepo) SetActive(ctx context.Context, id uint, active bool) error {
 	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("active", active)
 	if res.Error != nil {
 		return res.Error
@@ -73,7 +73,7 @@ func (r *UserRepo) SetActive(ctx context.Context, id string, active bool) error 
 	return nil
 }
 
-func (r *UserRepo) SetPasscode(ctx context.Context, id string, hash *string) error {
+func (r *UserRepo) SetPasscode(ctx context.Context, id uint, hash *string) error {
 	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("passcode_hash", hash)
 	if res.Error != nil {
 		return res.Error

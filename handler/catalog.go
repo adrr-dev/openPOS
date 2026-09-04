@@ -49,7 +49,11 @@ func (h *CatalogHandler) CreateCategory(c *gin.Context) {
 
 func (h *CatalogHandler) DeleteCategory(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
-	soft, err := h.svc.DeleteCategory(c.Request.Context(), claims.StoreID, c.Param("id"))
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	soft, err := h.svc.DeleteCategory(c.Request.Context(), claims.StoreID, id)
 	if err != nil {
 		respondCatalogErr(c, err)
 		return
@@ -61,7 +65,7 @@ type productReq struct {
 	Name       string  `json:"name"`
 	SKU        string  `json:"sku"`
 	Barcode    string  `json:"barcode"`
-	CategoryID *string `json:"categoryId"`
+	CategoryID *uint `json:"categoryId"`
 	BuyPrice   *int64  `json:"buyPrice"`
 	SellPrice  int64   `json:"sellPrice"`
 	Stock      *int    `json:"stock"`
@@ -72,7 +76,7 @@ func (h *CatalogHandler) ListProducts(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	q := c.Query
 
-	f := repo.ProductFilter{Q: q("q"), CategoryID: q("categoryId")}
+	f := repo.ProductFilter{Q: q("q"), CategoryID: queryID(q, "categoryId")}
 	if v := q("page"); v != "" {
 		f.Page, _ = strconv.Atoi(v)
 	}
@@ -94,7 +98,11 @@ func (h *CatalogHandler) ListProducts(c *gin.Context) {
 
 func (h *CatalogHandler) GetProduct(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
-	p, err := h.svc.GetProduct(c.Request.Context(), claims.StoreID, c.Param("id"))
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	p, err := h.svc.GetProduct(c.Request.Context(), claims.StoreID, id)
 	if err != nil {
 		respondCatalogErr(c, err)
 		return
@@ -119,12 +127,16 @@ func (h *CatalogHandler) CreateProduct(c *gin.Context) {
 
 func (h *CatalogHandler) UpdateProduct(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
 	var req productReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	p, err := h.svc.UpdateProduct(c.Request.Context(), claims.StoreID, c.Param("id"), productInputFrom(&req))
+	p, err := h.svc.UpdateProduct(c.Request.Context(), claims.StoreID, id, productInputFrom(&req))
 	if err != nil {
 		respondCatalogErr(c, err)
 		return
@@ -134,6 +146,10 @@ func (h *CatalogHandler) UpdateProduct(c *gin.Context) {
 
 func (h *CatalogHandler) SetProductActive(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
 	var req struct {
 		Active bool `json:"active"`
 	}
@@ -141,7 +157,7 @@ func (h *CatalogHandler) SetProductActive(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	if err := h.svc.SetProductActive(c.Request.Context(), claims.StoreID, c.Param("id"), req.Active); err != nil {
+	if err := h.svc.SetProductActive(c.Request.Context(), claims.StoreID, id, req.Active); err != nil {
 		respondCatalogErr(c, err)
 		return
 	}

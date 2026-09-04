@@ -26,11 +26,11 @@ func NewCatalogService(cats *repo.CategoryRepo, prods *repo.ProductRepo, movs *r
 	return &CatalogService{cats: cats, prods: prods, movs: movs}
 }
 
-func (s *CatalogService) ListCategories(ctx context.Context, storeID string) ([]*model.Category, error) {
+func (s *CatalogService) ListCategories(ctx context.Context, storeID uint) ([]*model.Category, error) {
 	return s.cats.ListByStore(ctx, storeID)
 }
 
-func (s *CatalogService) CreateCategory(ctx context.Context, storeID, name string) (*model.Category, error) {
+func (s *CatalogService) CreateCategory(ctx context.Context, storeID uint, name string) (*model.Category, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("nama kategori wajib diisi")
@@ -45,7 +45,7 @@ func (s *CatalogService) CreateCategory(ctx context.Context, storeID, name strin
 	return c, nil
 }
 
-func (s *CatalogService) DeleteCategory(ctx context.Context, storeID, id string) (soft bool, err error) {
+func (s *CatalogService) DeleteCategory(ctx context.Context, storeID, id uint) (soft bool, err error) {
 	return s.cats.Delete(ctx, storeID, id)
 }
 
@@ -53,7 +53,7 @@ type ProductInput struct {
 	Name       string
 	SKU        string
 	Barcode    string
-	CategoryID *string
+	CategoryID *uint
 	BuyPrice   int64
 	SellPrice  int64
 	Stock      int
@@ -83,11 +83,11 @@ func normalizeProductInput(in *ProductInput) error {
 	return nil
 }
 
-func (s *CatalogService) CreateProduct(ctx context.Context, storeID, actorName string, in ProductInput) (*model.Product, error) {
+func (s *CatalogService) CreateProduct(ctx context.Context, storeID uint, actorName string, in ProductInput) (*model.Product, error) {
 	if err := normalizeProductInput(&in); err != nil {
 		return nil, err
 	}
-	if in.CategoryID != nil && *in.CategoryID != "" {
+	if in.CategoryID != nil && *in.CategoryID != 0 {
 		if _, err := s.cats.GetByID(ctx, storeID, *in.CategoryID); err != nil {
 			return nil, ErrCategoryInvalid
 		}
@@ -116,11 +116,11 @@ func (s *CatalogService) CreateProduct(ctx context.Context, storeID, actorName s
 	return out, nil
 }
 
-func (s *CatalogService) UpdateProduct(ctx context.Context, storeID, id string, in ProductInput) (*model.Product, error) {
+func (s *CatalogService) UpdateProduct(ctx context.Context, storeID, id uint, in ProductInput) (*model.Product, error) {
 	if err := normalizeProductInput(&in); err != nil {
 		return nil, err
 	}
-	if in.CategoryID != nil && *in.CategoryID != "" {
+	if in.CategoryID != nil && *in.CategoryID != 0 {
 		if _, err := s.cats.GetByID(ctx, storeID, *in.CategoryID); err != nil {
 			return nil, ErrCategoryInvalid
 		}
@@ -158,15 +158,15 @@ func (s *CatalogService) UpdateProduct(ctx context.Context, storeID, id string, 
 	return out, nil
 }
 
-func (s *CatalogService) ListProducts(ctx context.Context, storeID string, f repo.ProductFilter) (*repo.ProductPage, error) {
+func (s *CatalogService) ListProducts(ctx context.Context, storeID uint, f repo.ProductFilter) (*repo.ProductPage, error) {
 	return s.prods.List(ctx, storeID, f)
 }
 
-func (s *CatalogService) GetProduct(ctx context.Context, storeID, id string) (*model.Product, error) {
+func (s *CatalogService) GetProduct(ctx context.Context, storeID, id uint) (*model.Product, error) {
 	return s.prods.GetByID(ctx, storeID, id)
 }
 
-func (s *CatalogService) SetProductActive(ctx context.Context, storeID, id string, active bool) error {
+func (s *CatalogService) SetProductActive(ctx context.Context, storeID, id uint, active bool) error {
 	err := s.prods.SetActive(ctx, storeID, id, active)
 	if errors.Is(err, repo.ErrNotFound) {
 		return ErrStoreMismatch
@@ -176,9 +176,8 @@ func (s *CatalogService) SetProductActive(ctx context.Context, storeID, id strin
 
 var ErrBadDirection = errors.New("arah penyesuaian tidak valid")
 
-func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID, actor, direction string, qty int64, reason string) (*model.Product, error) {
+func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID uint, actor, direction string, qty int64, reason string) (*model.Product, error) {
 	reason = strings.TrimSpace(reason)
-	productID = strings.TrimSpace(productID)
 	if direction != "plus" && direction != "minus" {
 		return nil, ErrBadDirection
 	}
@@ -206,6 +205,6 @@ func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID, ac
 	return p, nil
 }
 
-func (s *CatalogService) ListMovements(ctx context.Context, storeID string, f repo.MovementFilter) (*repo.MovementPage, error) {
+func (s *CatalogService) ListMovements(ctx context.Context, storeID uint, f repo.MovementFilter) (*repo.MovementPage, error) {
 	return s.movs.List(ctx, storeID, f)
 }

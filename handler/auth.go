@@ -49,7 +49,7 @@ type logoutReq struct {
 }
 
 type switchReq struct {
-	TargetUserID string `json:"target_user_id"`
+	TargetUserID uint   `json:"target_user_id"`
 	Passcode     string `json:"passcode,omitempty"`
 }
 
@@ -152,7 +152,7 @@ func (h *AuthHandler) Switch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	if req.TargetUserID == "" {
+	if req.TargetUserID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id wajib diisi"})
 		return
 	}

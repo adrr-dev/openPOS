@@ -10,7 +10,7 @@ import (
 
 type MovementFilter struct {
 	Type      string
-	ProductID string
+	ProductID uint
 	Page      int
 	Limit     int
 }
@@ -32,7 +32,7 @@ func (r *MovementRepo) InsertTx(ctx context.Context, tx *gorm.DB, m *model.Movem
 	return tx.WithContext(ctx).Create(m).Error
 }
 
-func (r *MovementRepo) List(ctx context.Context, storeID string, f MovementFilter) (*MovementPage, error) {
+func (r *MovementRepo) List(ctx context.Context, storeID uint, f MovementFilter) (*MovementPage, error) {
 	page, limit := f.Page, f.Limit
 	if page < 1 {
 		page = 1
@@ -48,7 +48,7 @@ func (r *MovementRepo) List(ctx context.Context, storeID string, f MovementFilte
 	if f.Type != "" {
 		query = query.Where("type = ?", f.Type)
 	}
-	if f.ProductID != "" {
+	if f.ProductID != 0 {
 		query = query.Where("product_id = ?", f.ProductID)
 	}
 
@@ -57,7 +57,7 @@ func (r *MovementRepo) List(ctx context.Context, storeID string, f MovementFilte
 		return nil, err
 	}
 
-	var items = make([]*model.Movement, 0)
+	items := make([]*model.Movement, 0)
 	offset := (page - 1) * limit
 	err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&items).Error
 	if err != nil {

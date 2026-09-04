@@ -2,6 +2,10 @@
 
 Backend REST API untuk openPOS. Dibangun menggunakan **Go (Gin + GORM) + PostgreSQL (Supabase)** dengan fallback **sqlite** untuk dev lokal, dan siap di-deploy secara serverless di Vercel atau menggunakan server jangka panjang VPS.
 
+> **Catatan skema baru:** semua tabel memakai `gorm.Model` (ID **integer auto-increment** `1, 2, 3...`, `created_at`/`updated_at` otomatis, soft delete). Transaksi memakai ID numerik (format lama `TRX-0001` sudah tidak ada). Butuh wipe total sekali via `supabase/wipe.sql` sebelum deploy pertama — tidak ada jalur migrasi dari skema UUID lama. Contoh JSON di bawah masih menunjukkan ID string lama; anggap sebagai angka. Penghapusan kategori kosong tetap hard-delete; yang lain mengikuti soft-delete standar GORM.
+>
+> Karena tabel `users` dan `cashiers` punya urutan nomor terpisah, satu angka bisa ada di keduanya (mis. owner `1` dan kasir `1`). `POST /auth/switch` menyelesaikan otomatis dari status sesi; `PUT /users/{id}/passcode` menerima field opsional `"role": "admin"|"cashier"` bila perlu disambiguasi eksplisit.
+
 - **Base URL:** `https://openpos-api.vercel.app/api/v1`
 - **Format Payload:** `application/json` (Semua body request dan response berbentuk JSON)
 - **Format Error:** Semua kegagalan API akan mengembalikan payload error standar:

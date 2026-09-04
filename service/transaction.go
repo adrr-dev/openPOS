@@ -25,12 +25,12 @@ type CheckoutCmd struct {
 }
 
 type CheckoutItemCmd struct {
-	ProductID string
+	ProductID uint
 	Qty       int
 }
 
-func (s *TrxService) Checkout(ctx context.Context, storeID string, actingAsCashierID *string, fallbackName string, cmd CheckoutCmd) (*model.Trx, error) {
-	cashierID := ""
+func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string, cmd CheckoutCmd) (*model.Trx, error) {
+	var cashierID uint
 	cashierName := fallbackName
 
 	if actingAsCashierID != nil {
@@ -62,14 +62,14 @@ func (s *TrxService) Checkout(ctx context.Context, storeID string, actingAsCashi
 	})
 }
 
-func (s *TrxService) List(ctx context.Context, storeID, cashierID, q, method, date string, page, limit int) ([]*model.Trx, int, error) {
+func (s *TrxService) List(ctx context.Context, storeID, cashierID uint, q, method, date string, page, limit int) ([]*model.Trx, int, error) {
 	return s.trx.List(ctx, storeID, cashierID, q, method, date, page, limit)
 }
 
-func (s *TrxService) Get(ctx context.Context, storeID, id string) (*model.Trx, error) {
+func (s *TrxService) Get(ctx context.Context, storeID, id uint) (*model.Trx, error) {
 	return s.trx.GetByID(ctx, storeID, id)
 }
 
-func (s *TrxService) Refund(ctx context.Context, storeID, trxID string, items map[string]int, reason, byName string) (*model.Trx, error) {
+func (s *TrxService) Refund(ctx context.Context, storeID, trxID uint, items map[uint]int, reason, byName string) (*model.Trx, error) {
 	return s.trx.Refund(ctx, storeID, trxID, items, reason, byName)
 }

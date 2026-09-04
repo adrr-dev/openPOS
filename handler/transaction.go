@@ -19,8 +19,8 @@ type TrxHandler struct {
 func NewTrxHandler(svc *service.TrxService) *TrxHandler { return &TrxHandler{svc: svc} }
 
 type checkoutItemReq struct {
-	ProductID string `json:"productId"`
-	Qty       int    `json:"qty"`
+	ProductID uint `json:"productId"`
+	Qty       int  `json:"qty"`
 }
 
 type checkoutReq struct {
@@ -57,7 +57,7 @@ func (h *TrxHandler) List(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	qp := c.Query
 
-	cashierID := ""
+	var cashierID uint
 	if claims.ActingAsCashierID != nil {
 		cashierID = *claims.ActingAsCashierID
 	}
@@ -75,7 +75,11 @@ func (h *TrxHandler) List(c *gin.Context) {
 
 func (h *TrxHandler) Get(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
-	trx, err := h.svc.Get(c.Request.Context(), claims.StoreID, c.Param("id"))
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	trx, err := h.svc.Get(c.Request.Context(), claims.StoreID, id)
 	if err != nil {
 		respondTrxErr(c, err)
 		return
@@ -94,16 +98,20 @@ type refundReq struct {
 
 func (h *TrxHandler) Refund(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
 	var req refundReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	items := make(map[string]int, len(req.Items))
+	items := make(map[uint]int, len(req.Items))
 	for _, it := range req.Items {
 		items[it.ProductID] += it.Qty
 	}
-	trx, err := h.svc.Refund(c.Request.Context(), claims.StoreID, c.Param("id"), items, req.Reason, claims.Name)
+	trx, err := h.svc.Refund(c.Request.Context(), claims.StoreID, id, items, req.Reason, claims.Name)
 	if err != nil {
 		respondTrxErr(c, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -76,8 +77,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 	}
 	token := resp["access_token"].(string)
 	userObj := resp["user"].(map[string]any)
-	storeID := userObj["store_id"].(string)
-	if storeID == "" {
+	if userObj["store_id"].(float64) == 0 {
 		t.Fatalf("store_id is empty")
 	}
 
@@ -97,7 +97,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		t.Fatalf("CreateCashier failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
 	cashierUser := resp["user"].(map[string]any)
-	cashierID := cashierUser["id"].(string)
+	cashierID := uint(cashierUser["id"].(float64))
 
 	w, resp = doReq("GET", "/users", nil, token)
 	if w.Code != http.StatusOK {
@@ -108,12 +108,12 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		t.Fatalf("Expected at least 2 users (admin + cashier), got %d", len(usersList))
 	}
 
-	w, resp = doReq("PUT", "/users/"+cashierID+"/passcode", map[string]string{"passcode": "12345"}, token)
+	w, resp = doReq("PUT", fmt.Sprintf("/users/%d/passcode", cashierID), map[string]string{"passcode": "12345"}, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("SetPasscode failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
 
-	w, resp = doReq("POST", "/auth/switch", map[string]string{"target_user_id": cashierID, "passcode": "12345"}, token)
+	w, resp = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashierID, "passcode": "12345"}, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("Switch to cashier failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
@@ -124,7 +124,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		t.Fatalf("CreateCategory failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
 	catObj := resp["category"].(map[string]any)
-	catID := catObj["id"].(string)
+	catID := uint(catObj["id"].(float64))
 
 	prodBody := map[string]any{
 		"name":       "Beras 5kg",
@@ -140,7 +140,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		t.Fatalf("CreateProduct failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
 	prodObj := resp
-	prodID := prodObj["id"].(string)
+	prodID := uint(prodObj["id"].(float64))
 
 	checkoutBody := map[string]any{
 		"items": []any{
@@ -154,7 +154,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("Checkout failed: code=%d, body=%s", w.Code, w.Body.String())
 	}
-	trxID := resp["id"].(string)
+	trxID := uint(resp["id"].(float64))
 
 	w, resp = doReq("GET", "/transactions", nil, cashierToken)
 	if w.Code != http.StatusOK {
@@ -167,7 +167,7 @@ func TestAPIIntegrationFlow(t *testing.T) {
 		},
 		"reason": "Salah beli",
 	}
-	w, resp = doReq("POST", "/transactions/"+trxID+"/refund", refundBody, token)
+	w, resp = doReq("POST", fmt.Sprintf("/transactions/%d/refund", trxID), refundBody, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("Refund failed: code=%d, body=%s", w.Code, w.Body.String())
 	}

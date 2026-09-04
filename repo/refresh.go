@@ -15,7 +15,7 @@ type RefreshRepo struct {
 
 func NewRefreshRepo(db *gorm.DB) *RefreshRepo { return &RefreshRepo{db: db} }
 
-func (r *RefreshRepo) Create(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
+func (r *RefreshRepo) Create(ctx context.Context, userID uint, tokenHash string, expiresAt time.Time) error {
 	rt := model.RefreshToken{
 		UserID:    userID,
 		TokenHash: tokenHash,
@@ -38,6 +38,6 @@ func (r *RefreshRepo) Revoke(ctx context.Context, tokenHash string) error {
 	return r.db.WithContext(ctx).Model(&model.RefreshToken{}).Where("token_hash = ?", tokenHash).Update("revoked", true).Error
 }
 
-func (r *RefreshRepo) RevokeAllForUser(ctx context.Context, userID string) error {
+func (r *RefreshRepo) RevokeAllForUser(ctx context.Context, userID uint) error {
 	return r.db.WithContext(ctx).Model(&model.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }

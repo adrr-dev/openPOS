@@ -6,19 +6,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
-
-// isPostgres reports whether the dialector supports pg locks (FOR UPDATE,
-// pg_advisory_xact_lock). Sqlite path skips them — same results, no crash.
-func (r *TrxRepo) isPostgres() bool {
-	return r.db.Dialector.Name() != "sqlite"
-}
 
 var (
 	ErrPaidInsufficient = errors.New("jumlah bayar kurang dari total")
@@ -30,13 +23,13 @@ var (
 )
 
 type CheckoutItem struct {
-	ProductID string
+	ProductID uint
 	Qty       int
 }
 
 type CheckoutInput struct {
-	StoreID     string
-	CashierID   string
+	StoreID     uint
+	CashierID   uint
 	CashierName string
 	Items       []CheckoutItem
 	Discount    int64
@@ -51,6 +44,12 @@ type TrxRepo struct {
 
 func NewTrxRepo(db *gorm.DB) *TrxRepo { return &TrxRepo{db: db} }
 
+// isPostgres reports whether the dialector supports pg locks (FOR UPDATE,
+// pg_advisory_xact_lock). Sqlite path skips them — same results, no crash.
+func (r *TrxRepo) isPostgres() bool {
+	return r.db.Dialector.Name() != "sqlite"
+}
+
 func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, error) {
 	if len(in.Items) == 0 {
 		return nil, ErrEmptyItems
@@ -60,7 +59,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 	}
 
 	merged := make([]CheckoutItem, 0, len(in.Items))
-	idx := map[string]int{}
+	idx := map[uint]int{}
 	for _, it := range in.Items {
 		if j, ok := idx[it.ProductID]; ok {
 			merged[j].Qty += it.Qty
@@ -74,10 +73,10 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 	var resultTrx *model.Trx
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Serialize checkouts per store on postgres like old backend
-		// (SELECT pg_advisory_xact_lock). Skipped on sqlite.
+		// Serialize checkouts per store on postgres. Skipped on sqlite.
+		// IDs are numeric now, so pass the store as text for hashtext.
 		if r.isPostgres() {
-			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", in.StoreID).Error; err != nil {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", strconv.FormatUint(uint64(in.StoreID), 10)).Error; err != nil {
 				return err
 			}
 		}
@@ -105,7 +104,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 				q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 			}
 			if err := q.Where("id = ? AND store_id = ?", it.ProductID, in.StoreID).First(&prod).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
+				if isNotFound(err) {
 					return ErrNotFound
 				}
 				return err
@@ -149,19 +148,12 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 			paid = total
 		}
 
-		var maxSeq int64
-		tx.Model(&model.Trx{}).Select("COALESCE(MAX(seq), 0)").Scan(&maxSeq)
-		seq := int(maxSeq) + 1
-		id := "TRX-" + pad4(seq)
-
 		trxItemsList := make(model.TrxItemList, len(lines))
 		for i, l := range lines {
 			trxItemsList[i] = l.item
 		}
 
 		trx := model.Trx{
-			ID:          id,
-			Seq:         seq,
 			StoreID:     in.StoreID,
 			CashierID:   in.CashierID,
 			CashierName: in.CashierName,
@@ -175,7 +167,6 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 			Change:      change,
 			Status:      model.TrxCompleted,
 			Customer:    in.Customer,
-			CreatedAt:   time.Now(),
 		}
 
 		if err := tx.Create(&trx).Error; err != nil {
@@ -184,7 +175,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 
 		for _, l := range lines {
 			tItem := model.TransactionItem{
-				TrxID:     id,
+				TrxID:     trx.ID,
 				ProductID: l.item.ProductID,
 				Name:      l.item.Name,
 				BuyPrice:  l.item.BuyPrice,
@@ -211,7 +202,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 				ProductID: l.item.ProductID,
 				Type:      model.MovementSale,
 				Qty:       -l.qty,
-				Reason:    "Penjualan " + id,
+				Reason:    fmt.Sprintf("Penjualan %d", trx.ID),
 				Actor:     in.CashierName,
 			}
 			if err := tx.Create(&mv).Error; err != nil {
@@ -229,7 +220,7 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 	return resultTrx, nil
 }
 
-func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[string]int, reason, byName string) (*model.Trx, error) {
+func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID uint, items map[uint]int, reason, byName string) (*model.Trx, error) {
 	if len(items) == 0 {
 		return nil, ErrEmptyItems
 	}
@@ -239,7 +230,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if r.isPostgres() {
-			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", storeID).Error; err != nil {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", strconv.FormatUint(uint64(storeID), 10)).Error; err != nil {
 				return err
 			}
 		}
@@ -249,7 +240,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.Where("id = ? AND store_id = ?", trxID, storeID).First(&t).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if isNotFound(err) {
 				return ErrNotFound
 			}
 			return err
@@ -263,7 +254,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 			return err
 		}
 
-		sold := map[string]model.TrxItem{}
+		sold := map[uint]model.TrxItem{}
 		for _, ti := range tItems {
 			if prev, ok := sold[ti.ProductID]; ok {
 				prev.Qty += ti.Qty
@@ -284,7 +275,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 			return err
 		}
 
-		refunded := map[string]int{}
+		refunded := map[uint]int{}
 		for _, ref := range refunds {
 			for pid, q := range ref.Items {
 				refunded[pid] += q
@@ -313,7 +304,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 				ProductID: pid,
 				Type:      model.MovementRefund,
 				Qty:       want,
-				Reason:    "Refund " + trxID,
+				Reason:    fmt.Sprintf("Refund %d", trxID),
 				Actor:     byName,
 			}
 			if err := tx.Create(&mv).Error; err != nil {
@@ -361,7 +352,7 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 	return r.GetByID(ctx, storeID, trxID)
 }
 
-func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date string, page, limit int) ([]*model.Trx, int, error) {
+func (r *TrxRepo) List(ctx context.Context, storeID, cashierID uint, q, method, date string, page, limit int) ([]*model.Trx, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -373,12 +364,17 @@ func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date 
 	}
 
 	query := r.db.WithContext(ctx).Model(&model.Trx{}).Where("store_id = ?", storeID)
-	if cashierID != "" {
+	if cashierID != 0 {
 		query = query.Where("cashier_id = ?", cashierID)
 	}
 	if qs := strings.TrimSpace(q); qs != "" {
 		searchTerm := "%" + strings.ToLower(qs) + "%"
-		query = query.Where("lower(id) LIKE ? OR lower(cashier_name) LIKE ?", searchTerm, searchTerm)
+		// IDs are numeric now: exact match when q is a number, name search otherwise.
+		if n, err := strconv.ParseUint(qs, 10, 64); err == nil {
+			query = query.Where("id = ? OR lower(cashier_name) LIKE ?", n, searchTerm)
+		} else {
+			query = query.Where("lower(cashier_name) LIKE ?", searchTerm)
+		}
 	}
 	if method != "" {
 		query = query.Where("method = ?", method)
@@ -398,19 +394,19 @@ func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date 
 
 	list := make([]*model.Trx, 0)
 	offset := (page - 1) * limit
-	err := query.Order("created_at DESC, seq DESC").Limit(limit).Offset(offset).Find(&list).Error
+	err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&list).Error
 	if err != nil {
 		return nil, 0, err
 	}
 
 	if len(list) > 0 {
-		ids := make([]string, len(list))
+		ids := make([]uint, len(list))
 		for i, t := range list {
 			ids[i] = t.ID
 		}
 		var items []model.TransactionItem
 		if err := r.db.WithContext(ctx).Where("trx_id IN ?", ids).Order("id ASC").Find(&items).Error; err == nil {
-			byID := map[string]*model.Trx{}
+			byID := map[uint]*model.Trx{}
 			for _, t := range list {
 				t.Items = []model.TrxItem{}
 				byID[t.ID] = t
@@ -432,7 +428,7 @@ func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date 
 	return list, int(total), nil
 }
 
-func (r *TrxRepo) GetByID(ctx context.Context, storeID, id string) (*model.Trx, error) {
+func (r *TrxRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Trx, error) {
 	var t model.Trx
 	if err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&t).Error; err != nil {
 		return nil, mapDBErr(err)
@@ -452,14 +448,6 @@ func (r *TrxRepo) GetByID(ctx context.Context, storeID, id string) (*model.Trx, 
 		}
 	}
 	return &t, nil
-}
-
-func pad4(n int) string {
-	s := strconv.Itoa(n)
-	for len(s) < 4 {
-		s = "0" + s
-	}
-	return s
 }
 
 func roundHalfUp(f float64) int64 {

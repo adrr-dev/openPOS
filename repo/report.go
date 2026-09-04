@@ -38,7 +38,7 @@ func periodStarts(nowUTC time.Time, loc *time.Location, period string) (time.Tim
 	}
 }
 
-func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, cashierView bool, tz string) (any, error) {
+func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID uint, cashierView bool, tz string) (any, error) {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		loc = time.UTC
@@ -49,7 +49,7 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 	dayEnd := dayStart.AddDate(0, 0, 1)
 
 	query := r.db.WithContext(ctx).Model(&model.Trx{}).Where("store_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?", storeID, dayStart.UTC(), dayEnd.UTC())
-	if cashierView {
+	if cashierView && cashierID != 0 {
 		query = query.Where("cashier_id = ?", cashierID)
 	}
 
@@ -66,7 +66,7 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 	itemsQuery := r.db.WithContext(ctx).Model(&model.TransactionItem{}).
 		Joins("JOIN transactions ON transactions.id = transaction_items.trx_id").
 		Where("transactions.store_id = ? AND transactions.status = 'completed' AND transactions.created_at >= ? AND transactions.created_at < ?", storeID, dayStart.UTC(), dayEnd.UTC())
-	if cashierView {
+	if cashierView && cashierID != 0 {
 		itemsQuery = itemsQuery.Where("transactions.cashier_id = ?", cashierID)
 	}
 	var itemsSold int64
@@ -94,7 +94,6 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 	}
 	if r.db.Dialector.Name() == "sqlite" {
 		// sqlite has no AT TIME ZONE / ::date: aggregate in Go for local testing.
-		// Same visible response as postgres (zeros when empty, sums otherwise).
 		var trxs []model.Trx
 		if err := r.db.WithContext(ctx).
 			Where("store_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?", storeID, weekStart.UTC(), dayEnd.UTC()).
@@ -144,7 +143,7 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 		sales7 = append(sales7, model.DayPoint{Date: key, Omzet: byDate[key]})
 	}
 
-	var methods = []model.MethodPoint{}
+	methods := []model.MethodPoint{}
 	r.db.WithContext(ctx).Model(&model.Trx{}).
 		Select("method, COALESCE(SUM(total), 0) as total").
 		Where("store_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?", storeID, dayStart.UTC(), dayEnd.UTC()).
@@ -155,7 +154,7 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 		methods = []model.MethodPoint{}
 	}
 
-	var top = []model.TopProduct{}
+	top := []model.TopProduct{}
 	r.db.WithContext(ctx).Model(&model.TransactionItem{}).
 		Select("transaction_items.product_id, transaction_items.name, SUM(transaction_items.qty) as qty, SUM(transaction_items.qty * transaction_items.price) as revenue").
 		Joins("JOIN transactions ON transactions.id = transaction_items.trx_id").
@@ -178,14 +177,14 @@ func (r *ReportRepo) Dashboard(ctx context.Context, storeID, cashierID string, c
 	}, nil
 }
 
-func (r *ReportRepo) recentTrx(ctx context.Context, storeID, cashierID string, cashierView bool, dayStart, dayEnd time.Time) ([]model.TrxBrief, error) {
+func (r *ReportRepo) recentTrx(ctx context.Context, storeID, cashierID uint, cashierView bool, dayStart, dayEnd time.Time) ([]model.TrxBrief, error) {
 	query := r.db.WithContext(ctx).Model(&model.Trx{}).
 		Select("id, cashier_name, total, status, created_at as time").
 		Where("store_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?", storeID, dayStart.UTC(), dayEnd.UTC())
-	if cashierView {
+	if cashierView && cashierID != 0 {
 		query = query.Where("cashier_id = ?", cashierID)
 	}
-	var recent = []model.TrxBrief{}
+	recent := []model.TrxBrief{}
 	err := query.Order("created_at DESC").Limit(5).Scan(&recent).Error
 	if recent == nil {
 		recent = []model.TrxBrief{}
@@ -193,7 +192,7 @@ func (r *ReportRepo) recentTrx(ctx context.Context, storeID, cashierID string, c
 	return recent, err
 }
 
-func (r *ReportRepo) Report(ctx context.Context, storeID, period, tz string) (*model.ReportBundle, error) {
+func (r *ReportRepo) Report(ctx context.Context, storeID uint, period, tz string) (*model.ReportBundle, error) {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		loc = time.UTC
@@ -214,13 +213,13 @@ func (r *ReportRepo) Report(ctx context.Context, storeID, period, tz string) (*m
 	}
 
 	if len(list) > 0 {
-		ids := make([]string, len(list))
+		ids := make([]uint, len(list))
 		for i, t := range list {
 			ids[i] = t.ID
 		}
 		var items []model.TransactionItem
 		if err := r.db.WithContext(ctx).Where("trx_id IN ?", ids).Order("id ASC").Find(&items).Error; err == nil {
-			byID := map[string]*model.Trx{}
+			byID := map[uint]*model.Trx{}
 			for _, t := range list {
 				t.Items = []model.TrxItem{}
 				byID[t.ID] = t
@@ -248,9 +247,7 @@ func (r *ReportRepo) Report(ctx context.Context, storeID, period, tz string) (*m
 		Stock:        []model.StockRow{},
 	}
 
-	// Fixed: old backend built prodAgg but never appended (always []).
-	// Populate Products properly — strictly better, no nil risk.
-	prodAgg := map[string]*model.ProductReportRow{}
+	prodAgg := map[uint]*model.ProductReportRow{}
 	for _, t := range list {
 		var hpp int64
 		for _, it := range t.Items {
@@ -286,11 +283,12 @@ func (r *ReportRepo) Report(ctx context.Context, storeID, period, tz string) (*m
 			Status:  t.Status,
 		})
 	}
+
 	// Fill SKU via product lookup (TransactionItem has no SKU column).
 	if len(prodAgg) > 0 {
 		var prodsForSKU []model.Product
 		_ = r.db.WithContext(ctx).Where("store_id = ?", storeID).Find(&prodsForSKU).Error
-		skuByID := make(map[string]string, len(prodsForSKU))
+		skuByID := make(map[uint]string, len(prodsForSKU))
 		for _, p := range prodsForSKU {
 			skuByID[p.ID] = p.SKU
 		}

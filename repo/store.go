@@ -14,7 +14,7 @@ type StoreRepo struct {
 
 func NewStoreRepo(db *gorm.DB) *StoreRepo { return &StoreRepo{db: db} }
 
-func (r *StoreRepo) GetSettings(ctx context.Context, storeID string) (*model.StoreSettings, error) {
+func (r *StoreRepo) GetSettings(ctx context.Context, storeID uint) (*model.StoreSettings, error) {
 	var st model.Store
 	if err := r.db.WithContext(ctx).Where("id = ?", storeID).First(&st).Error; err != nil {
 		return nil, mapDBErr(err)
@@ -32,7 +32,7 @@ func (r *StoreRepo) GetSettings(ctx context.Context, storeID string) (*model.Sto
 	}, nil
 }
 
-func (r *StoreRepo) GetTimezone(ctx context.Context, storeID string) (string, error) {
+func (r *StoreRepo) GetTimezone(ctx context.Context, storeID uint) (string, error) {
 	var st model.Store
 	if err := r.db.WithContext(ctx).Where("id = ?", storeID).First(&st).Error; err != nil {
 		return "Asia/Makassar", mapDBErr(err)
@@ -43,7 +43,7 @@ func (r *StoreRepo) GetTimezone(ctx context.Context, storeID string) (string, er
 	return st.Timezone, nil
 }
 
-func (r *StoreRepo) UpdateSettings(ctx context.Context, storeID string, s *model.StoreSettings) (*model.StoreSettings, error) {
+func (r *StoreRepo) UpdateSettings(ctx context.Context, storeID uint, s *model.StoreSettings) (*model.StoreSettings, error) {
 	res := r.db.WithContext(ctx).Model(&model.Store{}).Where("id = ?", storeID).Updates(map[string]interface{}{
 		"name":           s.Name,
 		"address":        s.Address,
@@ -64,7 +64,7 @@ func (r *StoreRepo) UpdateSettings(ctx context.Context, storeID string, s *model
 	return r.GetSettings(ctx, storeID)
 }
 
-func (r *StoreRepo) SetPasscode(ctx context.Context, storeID, userID string, hash *string) error {
+func (r *StoreRepo) SetPasscode(ctx context.Context, storeID, userID uint, hash *string) error {
 	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ? AND store_id = ?", userID, storeID).Update("passcode_hash", hash)
 	if res.Error != nil {
 		return res.Error

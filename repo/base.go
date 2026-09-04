@@ -11,6 +11,10 @@ var (
 	ErrDuplicate = errors.New("data sudah ada")
 )
 
+func isNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
+}
+
 func mapDBErr(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrNotFound

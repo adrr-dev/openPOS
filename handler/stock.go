@@ -22,7 +22,7 @@ func (h *StockHandler) ListMovements(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	q := c.Query
 
-	f := repo.MovementFilter{Type: q("type"), ProductID: q("productId")}
+	f := repo.MovementFilter{Type: q("type"), ProductID: queryID(q, "productId")}
 	if v := q("page"); v != "" {
 		f.Page, _ = strconv.Atoi(v)
 	}
@@ -39,7 +39,7 @@ func (h *StockHandler) ListMovements(c *gin.Context) {
 }
 
 type adjustReq struct {
-	ProductID string `json:"productId"`
+	ProductID uint   `json:"productId"`
 	Direction string `json:"direction"`
 	Qty       int64  `json:"qty"`
 	Reason    string `json:"reason"`

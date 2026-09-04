@@ -22,7 +22,13 @@ func main() {
 	sqlDB, _ := database.DB()
 	defer sqlDB.Close()
 
-	if err := database.Exec("TRUNCATE TABLE stores, email_otps RESTART IDENTITY CASCADE;").Error; err != nil {
+	// No FK constraints in the schema (plain uint keys, app scopes by store),
+	// so every table must be listed explicitly.
+	if err := database.Exec(`TRUNCATE TABLE
+		refunds, transaction_items, transactions,
+		stock_movements, products, categories,
+		refresh_tokens, cashiers, users, stores, email_otps
+		RESTART IDENTITY CASCADE;`).Error; err != nil {
 		log.Fatalf("truncate error: %v", err)
 	}
 

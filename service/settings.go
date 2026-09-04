@@ -24,11 +24,11 @@ func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, cashiers *
 	return &SettingsService{stores: stores, users: users, cashiers: cashiers, reports: reports}
 }
 
-func (s *SettingsService) Get(ctx context.Context, storeID string) (*model.StoreSettings, error) {
+func (s *SettingsService) Get(ctx context.Context, storeID uint) (*model.StoreSettings, error) {
 	return s.stores.GetSettings(ctx, storeID)
 }
 
-func (s *SettingsService) Update(ctx context.Context, storeID string, in *model.StoreSettings) (*model.StoreSettings, error) {
+func (s *SettingsService) Update(ctx context.Context, storeID uint, in *model.StoreSettings) (*model.StoreSettings, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
 		return nil, fmt.Errorf("nama toko wajib diisi")
@@ -49,7 +49,11 @@ func (s *SettingsService) Update(ctx context.Context, storeID string, in *model.
 	return s.stores.UpdateSettings(ctx, storeID, in)
 }
 
-func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID, passcode string) error {
+// SetPasscode sets the 5-digit PIN for an owner or cashier. roleHint comes
+// from the /users list entry the admin clicked ("admin"/"cashier"/"") —
+// users and cashiers have independent numeric sequences, so one number can
+// exist in both tables. Empty hint keeps the legacy cashier-first order.
+func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID uint, passcode, roleHint string) error {
 	passcode = strings.TrimSpace(passcode)
 	var hash *string
 	if passcode != "" {
@@ -69,20 +73,24 @@ func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID, pa
 		hash = &hs
 	}
 
-	c, err := s.cashiers.GetByID(ctx, targetID)
-	if err == nil && c.StoreID == storeID {
-		return s.cashiers.SetPasscode(ctx, targetID, hash)
-	}
+	tryCashier := roleHint == "" || roleHint == string(model.RoleCashier)
+	tryOwner := roleHint == "" || roleHint == string(model.RoleAdmin)
 
-	owner, err := s.users.GetByID(ctx, targetID)
-	if err == nil && owner.StoreID == storeID {
-		return s.users.SetPasscode(ctx, targetID, hash)
+	if tryCashier {
+		if c, err := s.cashiers.GetByID(ctx, targetID); err == nil && c.StoreID == storeID {
+			return s.cashiers.SetPasscode(ctx, targetID, hash)
+		}
+	}
+	if tryOwner {
+		if owner, err := s.users.GetByID(ctx, targetID); err == nil && owner.StoreID == storeID {
+			return s.users.SetPasscode(ctx, targetID, hash)
+		}
 	}
 
 	return ErrStoreMismatch
 }
 
-func (s *SettingsService) Dashboard(ctx context.Context, storeID, cashierID string, cashierView bool) (any, error) {
+func (s *SettingsService) Dashboard(ctx context.Context, storeID, cashierID uint, cashierView bool) (any, error) {
 	tz, err := s.stores.GetTimezone(ctx, storeID)
 	if err != nil {
 		tz = "Asia/Makassar"
@@ -97,7 +105,7 @@ var (
 
 var validPeriods = map[string]bool{"": true, "today": true, "yesterday": true, "week": true, "month": true, "all": true}
 
-func (s *SettingsService) Report(ctx context.Context, storeID, period string) (*model.ReportBundle, error) {
+func (s *SettingsService) Report(ctx context.Context, storeID uint, period string) (*model.ReportBundle, error) {
 	if !validPeriods[period] {
 		return nil, ErrBadPeriod
 	}

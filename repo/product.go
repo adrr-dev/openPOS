@@ -14,7 +14,7 @@ var ErrStockInsufficient = errors.New("stok tidak cukup")
 
 type ProductFilter struct {
 	Q          string
-	CategoryID string
+	CategoryID uint
 	Active     *bool
 	Page       int
 	Limit      int
@@ -33,7 +33,7 @@ type ProductRepo struct {
 
 func NewProductRepo(db *gorm.DB) *ProductRepo { return &ProductRepo{db: db} }
 
-func (r *ProductRepo) GetByID(ctx context.Context, storeID, id string) (*model.Product, error) {
+func (r *ProductRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Product, error) {
 	var p model.Product
 	var cat model.Category
 
@@ -49,7 +49,7 @@ func (r *ProductRepo) GetByID(ctx context.Context, storeID, id string) (*model.P
 	return &p, nil
 }
 
-func (r *ProductRepo) List(ctx context.Context, storeID string, f ProductFilter) (*ProductPage, error) {
+func (r *ProductRepo) List(ctx context.Context, storeID uint, f ProductFilter) (*ProductPage, error) {
 	page, limit := f.Page, f.Limit
 	if page < 1 {
 		page = 1
@@ -67,7 +67,7 @@ func (r *ProductRepo) List(ctx context.Context, storeID string, f ProductFilter)
 		searchTerm := "%" + strings.ToLower(q) + "%"
 		query = query.Where("lower(name) LIKE ? OR lower(sku) LIKE ? OR lower(barcode) LIKE ?", searchTerm, searchTerm, searchTerm)
 	}
-	if f.CategoryID != "" {
+	if f.CategoryID != 0 {
 		query = query.Where("category_id = ?", f.CategoryID)
 	}
 	if f.Active != nil {
@@ -79,7 +79,7 @@ func (r *ProductRepo) List(ctx context.Context, storeID string, f ProductFilter)
 		return nil, err
 	}
 
-	var products = make([]*model.Product, 0)
+	products := make([]*model.Product, 0)
 	offset := (page - 1) * limit
 	err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&products).Error
 	if err != nil {
@@ -99,7 +99,7 @@ func (r *ProductRepo) List(ctx context.Context, storeID string, f ProductFilter)
 	return &ProductPage{Items: products, Total: int(total), Page: page, Limit: limit}, nil
 }
 
-func (r *ProductRepo) Create(ctx context.Context, storeID string, p *model.Product) (*model.Product, error) {
+func (r *ProductRepo) Create(ctx context.Context, storeID uint, p *model.Product) (*model.Product, error) {
 	p.StoreID = storeID
 	err := r.db.WithContext(ctx).Create(p).Error
 	if err != nil {
@@ -108,7 +108,7 @@ func (r *ProductRepo) Create(ctx context.Context, storeID string, p *model.Produ
 	return r.GetByID(ctx, storeID, p.ID)
 }
 
-func (r *ProductRepo) Update(ctx context.Context, storeID, id string, p *model.Product) (*model.Product, error) {
+func (r *ProductRepo) Update(ctx context.Context, storeID, id uint, p *model.Product) (*model.Product, error) {
 	res := r.db.WithContext(ctx).Model(&model.Product{}).Where("id = ? AND store_id = ?", id, storeID).Updates(map[string]interface{}{
 		"category_id": p.CategoryID,
 		"name":        p.Name,
@@ -127,7 +127,7 @@ func (r *ProductRepo) Update(ctx context.Context, storeID, id string, p *model.P
 	return r.GetByID(ctx, storeID, id)
 }
 
-func (r *ProductRepo) SetActive(ctx context.Context, storeID, id string, active bool) error {
+func (r *ProductRepo) SetActive(ctx context.Context, storeID, id uint, active bool) error {
 	res := r.db.WithContext(ctx).Model(&model.Product{}).Where("id = ? AND store_id = ?", id, storeID).Update("active", active)
 	if res.Error != nil {
 		return res.Error
@@ -138,13 +138,13 @@ func (r *ProductRepo) SetActive(ctx context.Context, storeID, id string, active 
 	return nil
 }
 
-func (r *ProductRepo) IsSkuTaken(ctx context.Context, storeID, sku, exceptProductID string) (bool, error) {
+func (r *ProductRepo) IsSkuTaken(ctx context.Context, storeID uint, sku string, exceptProductID uint) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Product{}).Where("store_id = ? AND lower(sku) = lower(?) AND id <> ?", storeID, strings.TrimSpace(sku), exceptProductID).Count(&count).Error
 	return count > 0, err
 }
 
-func (r *ProductRepo) CreateWithInitialMovement(ctx context.Context, storeID string, p *model.Product, actor string) (*model.Product, error) {
+func (r *ProductRepo) CreateWithInitialMovement(ctx context.Context, storeID uint, p *model.Product, actor string) (*model.Product, error) {
 	p.StoreID = storeID
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(p).Error; err != nil {
@@ -171,9 +171,8 @@ func (r *ProductRepo) CreateWithInitialMovement(ctx context.Context, storeID str
 	return r.GetByID(ctx, storeID, p.ID)
 }
 
-func (r *ProductRepo) AdjustStock(ctx context.Context, storeID, productID string, delta int, reason, actor string) (*model.Product, error) {
-	// Fixed TOCTOU: old code did First -> compute -> Save (race).
-	// Now atomic: UPDATE ... SET stock = stock+delta WHERE stock+delta >= 0.
+func (r *ProductRepo) AdjustStock(ctx context.Context, storeID, productID uint, delta int, reason, actor string) (*model.Product, error) {
+	// Atomic: UPDATE ... SET stock = stock+delta WHERE stock+delta >= 0.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&model.Product{}).
 			Where("id = ? AND store_id = ? AND stock + ? >= 0", productID, storeID, delta).

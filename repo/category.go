@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"errors"
 
 	"gorm.io/gorm"
 
@@ -15,7 +14,7 @@ type CategoryRepo struct {
 
 func NewCategoryRepo(db *gorm.DB) *CategoryRepo { return &CategoryRepo{db: db} }
 
-func (r *CategoryRepo) ListByStore(ctx context.Context, storeID string) ([]*model.Category, error) {
+func (r *CategoryRepo) ListByStore(ctx context.Context, storeID uint) ([]*model.Category, error) {
 	out := make([]*model.Category, 0)
 	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").Find(&out).Error
 	if err != nil {
@@ -24,7 +23,7 @@ func (r *CategoryRepo) ListByStore(ctx context.Context, storeID string) ([]*mode
 	return out, nil
 }
 
-func (r *CategoryRepo) GetByID(ctx context.Context, storeID, id string) (*model.Category, error) {
+func (r *CategoryRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Category, error) {
 	var c model.Category
 	err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&c).Error
 	if err != nil {
@@ -33,7 +32,7 @@ func (r *CategoryRepo) GetByID(ctx context.Context, storeID, id string) (*model.
 	return &c, nil
 }
 
-func (r *CategoryRepo) Create(ctx context.Context, storeID, name string) (*model.Category, error) {
+func (r *CategoryRepo) Create(ctx context.Context, storeID uint, name string) (*model.Category, error) {
 	c := model.Category{
 		StoreID: storeID,
 		Name:    name,
@@ -46,11 +45,11 @@ func (r *CategoryRepo) Create(ctx context.Context, storeID, name string) (*model
 	return &c, nil
 }
 
-func (r *CategoryRepo) Delete(ctx context.Context, storeID, id string) (softDeleted bool, err error) {
+func (r *CategoryRepo) Delete(ctx context.Context, storeID, id uint) (softDeleted bool, err error) {
 	var c model.Category
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("id = ? AND store_id = ?", id, storeID).First(&c).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if isNotFound(err) {
 				return ErrNotFound
 			}
 			return err
@@ -66,7 +65,9 @@ func (r *CategoryRepo) Delete(ctx context.Context, storeID, id string) (softDele
 			return tx.Model(&c).Update("active", false).Error
 		}
 
-		return tx.Delete(&c).Error
+		// gorm.Model soft-deletes by default; empty categories were hard
+		// deleted before, so bypass the soft delete here.
+		return tx.Unscoped().Delete(&c).Error
 	})
 	return softDeleted, mapDBErr(err)
 }

@@ -25,14 +25,14 @@ type MethodPoint struct {
 }
 
 type TopProduct struct {
-	ProductID string `json:"product_id"`
+	ProductID uint   `json:"product_id"`
 	Name      string `json:"name"`
 	Qty       int    `json:"qty"`
 	Revenue   int64  `json:"revenue"`
 }
 
 type TrxBrief struct {
-	ID          string    `json:"id"`
+	ID          uint      `json:"id"`
 	CashierName string    `json:"cashier_name"`
 	Total       int64     `json:"total"`
 	Status      TrxStatus `json:"status"`
@@ -69,7 +69,7 @@ type ReportSummary struct {
 }
 
 type ProductReportRow struct {
-	ProductID string `json:"product_id"`
+	ProductID uint   `json:"product_id"`
 	Name      string `json:"name"`
 	SKU       string `json:"sku"`
 	Qty       int    `json:"qty"`
@@ -79,7 +79,7 @@ type ProductReportRow struct {
 
 type TrxProfitRow struct {
 	Date    string    `json:"date"`
-	ID      string    `json:"id"`
+	ID      uint      `json:"id"`
 	Cashier string    `json:"cashier"`
 	Method  string    `json:"method"`
 	Total   int64     `json:"total"`
