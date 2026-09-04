@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"github.com/0xMinomus/openPOS/backend/model"
 	"github.com/0xMinomus/openPOS/backend/repo"
 )
@@ -28,8 +26,6 @@ func NewCatalogService(cats *repo.CategoryRepo, prods *repo.ProductRepo, movs *r
 	return &CatalogService{cats: cats, prods: prods, movs: movs}
 }
 
-// ── kategori ─────────────────────────────────────────────────────────
-
 func (s *CatalogService) ListCategories(ctx context.Context, storeID string) ([]*model.Category, error) {
 	return s.cats.ListByStore(ctx, storeID)
 }
@@ -41,8 +37,7 @@ func (s *CatalogService) CreateCategory(ctx context.Context, storeID, name strin
 	}
 	c, err := s.cats.Create(ctx, storeID, name)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.Is(err, repo.ErrDuplicate) || (errors.As(err, &pgErr) && pgErr.Code == "23505") {
+		if errors.Is(err, repo.ErrDuplicate) {
 			return nil, ErrCategoryTaken
 		}
 		return nil, err
@@ -50,12 +45,9 @@ func (s *CatalogService) CreateCategory(ctx context.Context, storeID, name strin
 	return c, nil
 }
 
-// DeleteCategory menghapus kategori: bila masih dipakai produk → soft-delete (FR-CAT-002).
 func (s *CatalogService) DeleteCategory(ctx context.Context, storeID, id string) (soft bool, err error) {
 	return s.cats.Delete(ctx, storeID, id)
 }
-
-// ── produk ───────────────────────────────────────────────────────────
 
 type ProductInput struct {
 	Name       string
@@ -91,11 +83,6 @@ func normalizeProductInput(in *ProductInput) error {
 	return nil
 }
 
-func isPgUnique(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
-
 func (s *CatalogService) CreateProduct(ctx context.Context, storeID, actorName string, in ProductInput) (*model.Product, error) {
 	if err := normalizeProductInput(&in); err != nil {
 		return nil, err
@@ -121,7 +108,7 @@ func (s *CatalogService) CreateProduct(ctx context.Context, storeID, actorName s
 	}
 	out, err := s.prods.CreateWithInitialMovement(ctx, storeID, p, actorName)
 	if err != nil {
-		if isPgUnique(err) || errors.Is(err, repo.ErrDuplicate) {
+		if errors.Is(err, repo.ErrDuplicate) {
 			return nil, ErrSkuTaken
 		}
 		return nil, err
@@ -160,11 +147,11 @@ func (s *CatalogService) UpdateProduct(ctx context.Context, storeID, id string, 
 	}
 	out, err := s.prods.Update(ctx, storeID, id, p)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotFound) || isPgUnique(err) {
-			if isPgUnique(err) {
-				return nil, ErrSkuTaken
-			}
+		if errors.Is(err, repo.ErrNotFound) {
 			return nil, ErrStoreMismatch
+		}
+		if errors.Is(err, repo.ErrDuplicate) {
+			return nil, ErrSkuTaken
 		}
 		return nil, err
 	}
@@ -187,12 +174,8 @@ func (s *CatalogService) SetProductActive(ctx context.Context, storeID, id strin
 	return err
 }
 
-// ── stok ─────────────────────────────────────────────────────────────
-
 var ErrBadDirection = errors.New("arah penyesuaian tidak valid")
 
-// AdjustStock menyesuaikan stok produk (FR-INV-002): alasan wajib (FR-INV-003),
-// dilarang menghasilkan stok negatif (FR-INV-006), movement tercatat atomik.
 func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID, actor, direction string, qty int64, reason string) (*model.Product, error) {
 	reason = strings.TrimSpace(reason)
 	productID = strings.TrimSpace(productID)
@@ -223,7 +206,6 @@ func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID, ac
 	return p, nil
 }
 
-// ListMovements riwayat pergerakan stok toko (FR-INV-003).
 func (s *CatalogService) ListMovements(ctx context.Context, storeID string, f repo.MovementFilter) (*repo.MovementPage, error) {
 	return s.movs.List(ctx, storeID, f)
 }

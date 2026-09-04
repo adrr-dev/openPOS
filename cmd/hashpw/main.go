@@ -1,6 +1,3 @@
-// Utility: cetak bcrypt hash untuk membuat/mengubah akun secara manual
-// (mis. INSERT langsung dari Supabase Dashboard).
-// Pemakaian: go run ./cmd/hashpw <plain-text>
 package main
 
 import (

@@ -49,8 +49,6 @@ func (s *SettingsService) Update(ctx context.Context, storeID string, in *model.
 	return s.stores.UpdateSettings(ctx, storeID, in)
 }
 
-// SetPasscode: hash 5 digit; string kosong = hapus passcode.
-// Admin dapat mengatur akun mana pun (admin atau kasir) dalam tokonya.
 func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID, passcode string) error {
 	passcode = strings.TrimSpace(passcode)
 	var hash *string
@@ -71,13 +69,11 @@ func (s *SettingsService) SetPasscode(ctx context.Context, storeID, targetID, pa
 		hash = &hs
 	}
 
-	// Cek apakah target adalah kasir
 	c, err := s.cashiers.GetByID(ctx, targetID)
 	if err == nil && c.StoreID == storeID {
 		return s.cashiers.SetPasscode(ctx, targetID, hash)
 	}
 
-	// Cek apakah target adalah admin (owner)
 	owner, err := s.users.GetByID(ctx, targetID)
 	if err == nil && owner.StoreID == storeID {
 		return s.users.SetPasscode(ctx, targetID, hash)

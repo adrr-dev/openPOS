@@ -1,12 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/middleware"
 	"github.com/0xMinomus/openPOS/backend/repo"
@@ -32,13 +31,11 @@ type checkoutReq struct {
 	Customer string            `json:"customer"`
 }
 
-// Checkout — POST /api/v1/transactions 🔒 (admin & kasir)
-// Harga & total dihitung ulang di server; stok berkurang atomik.
-func (h *TrxHandler) Checkout(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *TrxHandler) Checkout(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req checkoutReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
 	cmd := service.CheckoutCmd{
@@ -48,50 +45,46 @@ func (h *TrxHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		cmd.Items = append(cmd.Items, service.CheckoutItemCmd{ProductID: it.ProductID, Qty: it.Qty})
 	}
 
-	trx, err := h.svc.Checkout(r.Context(), c.StoreID, c.ActingAsCashierID, c.Name, cmd)
+	trx, err := h.svc.Checkout(c.Request.Context(), claims.StoreID, claims.ActingAsCashierID, claims.Name, cmd)
 	if err != nil {
-		respondTrxErr(w, err)
+		respondTrxErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, trx)
+	c.JSON(http.StatusCreated, trx)
 }
 
-// List — GET /api/v1/transactions?q=&method=&date=&page=&limit= 🔒
-// Kasir otomatis hanya melihat transaksinya sendiri (FR-TRX-002).
-func (h *TrxHandler) List(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	qp := r.URL.Query()
+func (h *TrxHandler) List(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	qp := c.Query
 
 	cashierID := ""
-	if c.ActingAsCashierID != nil {
-		cashierID = *c.ActingAsCashierID
+	if claims.ActingAsCashierID != nil {
+		cashierID = *claims.ActingAsCashierID
 	}
-	page, _ := strconv.Atoi(qp.Get("page"))
-	limit, _ := strconv.Atoi(qp.Get("limit"))
+	page, _ := strconv.Atoi(qp("page"))
+	limit, _ := strconv.Atoi(qp("limit"))
 
-	list, total, err := h.svc.List(r.Context(), c.StoreID, cashierID,
-		qp.Get("q"), qp.Get("method"), qp.Get("date"), page, limit)
+	list, total, err := h.svc.List(c.Request.Context(), claims.StoreID, cashierID,
+		qp("q"), qp("method"), qp("date"), page, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Gagal memuat transaksi.")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat transaksi."})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total, "page": page, "limit": limit})
+	c.JSON(http.StatusOK, gin.H{"items": list, "total": total, "page": page, "limit": limit})
 }
 
-// Get — GET /api/v1/transactions/{id} 🔒
-func (h *TrxHandler) Get(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	trx, err := h.svc.Get(r.Context(), c.StoreID, chi.URLParam(r, "id"))
+func (h *TrxHandler) Get(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	trx, err := h.svc.Get(c.Request.Context(), claims.StoreID, c.Param("id"))
 	if err != nil {
-		respondTrxErr(w, err)
+		respondTrxErr(c, err)
 		return
 	}
-	// kasir hanya boleh detail miliknya
-	if c.ActingAsCashierID != nil && trx.CashierID != *c.ActingAsCashierID {
-		writeError(w, http.StatusNotFound, "Transaksi tidak ditemukan.")
+	if claims.ActingAsCashierID != nil && trx.CashierID != *claims.ActingAsCashierID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transaksi tidak ditemukan."})
 		return
 	}
-	writeJSON(w, http.StatusOK, trx)
+	c.JSON(http.StatusOK, trx)
 }
 
 type refundReq struct {
@@ -99,45 +92,44 @@ type refundReq struct {
 	Reason string            `json:"reason"`
 }
 
-// Refund — POST /api/v1/transactions/{id}/refund 🔒 admin (FR-REF-001..005)
-func (h *TrxHandler) Refund(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *TrxHandler) Refund(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req refundReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
 	items := make(map[string]int, len(req.Items))
 	for _, it := range req.Items {
 		items[it.ProductID] += it.Qty
 	}
-	trx, err := h.svc.Refund(r.Context(), c.StoreID, chi.URLParam(r, "id"), items, req.Reason, c.Name)
+	trx, err := h.svc.Refund(c.Request.Context(), claims.StoreID, c.Param("id"), items, req.Reason, claims.Name)
 	if err != nil {
-		respondTrxErr(w, err)
+		respondTrxErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, trx)
+	c.JSON(http.StatusOK, trx)
 }
 
-func respondTrxErr(w http.ResponseWriter, err error) {
+func respondTrxErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, repo.ErrEmptyItems):
-		writeError(w, http.StatusBadRequest, "Keranjang kosong.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Keranjang kosong."})
 	case errors.Is(err, repo.ErrStockInsufficient):
-		writeError(w, http.StatusConflict, "Stok tidak cukup untuk menyelesaikan transaksi.")
+		c.JSON(http.StatusConflict, gin.H{"error": "Stok tidak cukup untuk menyelesaikan transaksi."})
 	case errors.Is(err, repo.ErrPaidInsufficient):
-		writeError(w, http.StatusBadRequest, "Jumlah bayar kurang dari total.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Jumlah bayar kurang dari total."})
 	case errors.Is(err, repo.ErrBadDiscount):
-		writeError(w, http.StatusBadRequest, "Diskon melebihi subtotal.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Diskon melebihi subtotal."})
 	case errors.Is(err, repo.ErrProductInactive):
-		writeError(w, http.StatusBadRequest, "Ada produk yang tidak aktif.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Ada produk yang tidak aktif."})
 	case errors.Is(err, repo.ErrNotRefundable):
-		writeError(w, http.StatusConflict, "Transaksi ini tidak dapat direfund.")
+		c.JSON(http.StatusConflict, gin.H{"error": "Transaksi ini tidak dapat direfund."})
 	case errors.Is(err, repo.ErrRefundTooMuch):
-		writeError(w, http.StatusBadRequest, "Qty refund melebihi jumlah terjual.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Qty refund melebihi jumlah terjual."})
 	case errors.Is(err, repo.ErrNotFound):
-		writeError(w, http.StatusNotFound, "Transaksi tidak ditemukan.")
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transaksi tidak ditemukan."})
 	default:
-		writeError(w, http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 }

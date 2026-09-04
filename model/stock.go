@@ -1,6 +1,11 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
 
 type MovementType string
 
@@ -12,13 +17,27 @@ const (
 )
 
 type Movement struct {
-	ID          string       `json:"id"`
-	StoreID     string       `json:"-"`
-	ProductID   string       `json:"product_id"`
-	ProductName *string      `json:"product_name"`
-	Type        MovementType `json:"type"`
-	Qty         int          `json:"qty"`
-	Reason      string       `json:"reason"`
-	Actor       string       `json:"actor"`
-	CreatedAt   time.Time    `json:"created_at"`
+	ID          string       `gorm:"type:varchar(36);primaryKey" json:"id"`
+	StoreID     string       `gorm:"type:varchar(36);not null;index" json:"-"`
+	ProductID   string       `gorm:"type:varchar(36);not null;index" json:"product_id"`
+	ProductName *string      `gorm:"-" json:"product_name"`
+	Type        MovementType `gorm:"not null" json:"type"`
+	Qty         int          `gorm:"not null" json:"qty"`
+	Reason      string       `gorm:"not null;default:''" json:"reason"`
+	Actor       string       `gorm:"not null;default:''" json:"actor"`
+	CreatedAt   time.Time    `gorm:"not null" json:"created_at"`
+}
+
+func (Movement) TableName() string {
+	return "stock_movements"
+}
+
+func (m *Movement) BeforeCreate(tx *gorm.DB) error {
+	if m.ID == "" {
+		m.ID = uuid.NewString()
+	}
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = time.Now()
+	}
+	return nil
 }

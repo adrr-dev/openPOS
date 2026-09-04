@@ -1,12 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/middleware"
 	"github.com/0xMinomus/openPOS/backend/repo"
@@ -19,52 +18,44 @@ type CatalogHandler struct {
 
 func NewCatalogHandler(svc *service.CatalogService) *CatalogHandler { return &CatalogHandler{svc: svc} }
 
-// ── kategori ─────────────────────────────────────────────────────────
-
 type categoryReq struct {
 	Name string `json:"name"`
 }
 
-// ListCategories — GET /api/v1/categories 🔒 (admin & kasir; POS butuh daftar ini)
-func (h *CatalogHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	cats, err := h.svc.ListCategories(r.Context(), c.StoreID)
+func (h *CatalogHandler) ListCategories(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	cats, err := h.svc.ListCategories(c.Request.Context(), claims.StoreID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Gagal memuat kategori.")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat kategori."})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"categories": cats})
+	c.JSON(http.StatusOK, gin.H{"categories": cats})
 }
 
-// CreateCategory — POST /api/v1/categories 🔒 admin
-func (h *CatalogHandler) CreateCategory(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *CatalogHandler) CreateCategory(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req categoryReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	cat, err := h.svc.CreateCategory(r.Context(), c.StoreID, req.Name)
+	cat, err := h.svc.CreateCategory(c.Request.Context(), claims.StoreID, req.Name)
 	if err != nil {
-		respondCatalogErr(w, err)
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"category": cat})
+	c.JSON(http.StatusCreated, gin.H{"category": cat})
 }
 
-// DeleteCategory — DELETE /api/v1/categories/{id} 🔒 admin
-// Masih dipakai produk → soft-delete (nonaktif). Response: {"soft_deleted": true|false}
-func (h *CatalogHandler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	soft, err := h.svc.DeleteCategory(r.Context(), c.StoreID, chi.URLParam(r, "id"))
+func (h *CatalogHandler) DeleteCategory(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	soft, err := h.svc.DeleteCategory(c.Request.Context(), claims.StoreID, c.Param("id"))
 	if err != nil {
-		respondCatalogErr(w, err)
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"soft_deleted": soft})
+	c.JSON(http.StatusOK, gin.H{"soft_deleted": soft})
 }
-
-// ── produk ───────────────────────────────────────────────────────────
 
 type productReq struct {
 	Name       string  `json:"name"`
@@ -77,98 +68,84 @@ type productReq struct {
 	Unit       string  `json:"unit"`
 }
 
-// ListProducts — GET /api/v1/products?q=&categoryId=&active=&page=&limit= 🔒 (admin & kasir; POS butuh)
-func (h *CatalogHandler) ListProducts(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	q := r.URL.Query()
+func (h *CatalogHandler) ListProducts(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	q := c.Query
 
-	f := repo.ProductFilter{Q: q.Get("q"), CategoryID: q.Get("categoryId")}
-	if v := q.Get("page"); v != "" {
+	f := repo.ProductFilter{Q: q("q"), CategoryID: q("categoryId")}
+	if v := q("page"); v != "" {
 		f.Page, _ = strconv.Atoi(v)
 	}
-	if v := q.Get("limit"); v != "" {
+	if v := q("limit"); v != "" {
 		f.Limit, _ = strconv.Atoi(v)
 	}
-	if v := q.Get("active"); v == "true" || v == "false" {
+	if v := q("active"); v == "true" || v == "false" {
 		b := v == "true"
 		f.Active = &b
 	}
 
-	pageData, err := h.svc.ListProducts(r.Context(), c.StoreID, f)
+	pageData, err := h.svc.ListProducts(c.Request.Context(), claims.StoreID, f)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Gagal memuat produk.")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat produk."})
 		return
 	}
-	writeJSON(w, http.StatusOK, pageData)
+	c.JSON(http.StatusOK, pageData)
 }
 
-// GetProduct — GET /api/v1/products/{id} 🔒
-func (h *CatalogHandler) GetProduct(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	p, err := h.svc.GetProduct(r.Context(), c.StoreID, chi.URLParam(r, "id"))
+func (h *CatalogHandler) GetProduct(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	p, err := h.svc.GetProduct(c.Request.Context(), claims.StoreID, c.Param("id"))
 	if err != nil {
-		respondCatalogErr(w, err)
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	c.JSON(http.StatusOK, p)
 }
 
-// CreateProduct — POST /api/v1/products 🔒 admin
-func (h *CatalogHandler) CreateProduct(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	req, ok := decodeProduct(w, r)
-	if !ok {
+func (h *CatalogHandler) CreateProduct(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	var req productReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	p, err := h.svc.CreateProduct(r.Context(), c.StoreID, c.Name, productInputFrom(req))
+	p, err := h.svc.CreateProduct(c.Request.Context(), claims.StoreID, claims.Name, productInputFrom(&req))
 	if err != nil {
-		respondCatalogErr(w, err)
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, p)
+	c.JSON(http.StatusCreated, p)
 }
 
-// UpdateProduct — PUT /api/v1/products/{id} 🔒 admin (stok tidak diubah di sini)
-func (h *CatalogHandler) UpdateProduct(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	req, ok := decodeProduct(w, r)
-	if !ok {
+func (h *CatalogHandler) UpdateProduct(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	var req productReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	p, err := h.svc.UpdateProduct(r.Context(), c.StoreID, chi.URLParam(r, "id"), productInputFrom(req))
+	p, err := h.svc.UpdateProduct(c.Request.Context(), claims.StoreID, c.Param("id"), productInputFrom(&req))
 	if err != nil {
-		respondCatalogErr(w, err)
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	c.JSON(http.StatusOK, p)
 }
 
-// SetProductActive — PATCH /api/v1/products/{id}/active 🔒 admin
-func (h *CatalogHandler) SetProductActive(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *CatalogHandler) SetProductActive(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req struct {
 		Active bool `json:"active"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	if err := h.svc.SetProductActive(r.Context(), c.StoreID, chi.URLParam(r, "id"), req.Active); err != nil {
-		respondCatalogErr(w, err)
+	if err := h.svc.SetProductActive(c.Request.Context(), claims.StoreID, c.Param("id"), req.Active); err != nil {
+		respondCatalogErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Status produk diperbarui."})
-}
-
-// ── helper ───────────────────────────────────────────────────────────
-
-func decodeProduct(w http.ResponseWriter, r *http.Request) (*productReq, bool) {
-	var req productReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
-		return nil, false
-	}
-	return &req, true
+	c.JSON(http.StatusOK, gin.H{"message": "Status produk diperbarui."})
 }
 
 func productInputFrom(req *productReq) service.ProductInput {
@@ -189,17 +166,17 @@ func productInputFrom(req *productReq) service.ProductInput {
 	return in
 }
 
-func respondCatalogErr(w http.ResponseWriter, err error) {
+func respondCatalogErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrSkuTaken):
-		writeError(w, http.StatusConflict, "SKU sudah digunakan di toko ini.")
+		c.JSON(http.StatusConflict, gin.H{"error": "SKU sudah digunakan di toko ini."})
 	case errors.Is(err, service.ErrCategoryTaken):
-		writeError(w, http.StatusConflict, "Kategori dengan nama itu sudah ada.")
+		c.JSON(http.StatusConflict, gin.H{"error": "Kategori dengan nama itu sudah ada."})
 	case errors.Is(err, service.ErrCategoryInvalid):
-		writeError(w, http.StatusBadRequest, "Kategori tidak ditemukan di toko Anda.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Kategori tidak ditemukan di toko Anda."})
 	case errors.Is(err, service.ErrStoreMismatch):
-		writeError(w, http.StatusNotFound, "Produk tidak ditemukan.")
+		c.JSON(http.StatusNotFound, gin.H{"error": "Produk tidak ditemukan."})
 	default:
-		writeError(w, http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 }

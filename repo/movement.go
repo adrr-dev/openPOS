@@ -2,17 +2,14 @@ package repo
 
 import (
 	"context"
-	"strconv"
-	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
 
 type MovementFilter struct {
-	Type      string // sale|refund|adjust|initial (kosong = semua)
+	Type      string
 	ProductID string
 	Page      int
 	Limit     int
@@ -25,39 +22,16 @@ type MovementPage struct {
 	Limit int               `json:"limit"`
 }
 
-const movCols = `m.id, m.store_id, m.product_id, p.name, m.type, m.qty, m.reason, m.actor, m.created_at`
-
 type MovementRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewMovementRepo(pool *pgxpool.Pool) *MovementRepo { return &MovementRepo{pool: pool} }
+func NewMovementRepo(db *gorm.DB) *MovementRepo { return &MovementRepo{db: db} }
 
-func scanMovement(row interface{ Scan(...any) error }) (*model.Movement, error) {
-	var m model.Movement
-	if err := row.Scan(&m.ID, &m.StoreID, &m.ProductID, &m.ProductName,
-		&m.Type, &m.Qty, &m.Reason, &m.Actor, &m.CreatedAt); err != nil {
-		return nil, err
-	}
-	return &m, nil
+func (r *MovementRepo) InsertTx(ctx context.Context, tx *gorm.DB, m *model.Movement) error {
+	return tx.WithContext(ctx).Create(m).Error
 }
 
-// insertMovementTx menyimpan baris movement di dalam transaksi yang diberikan
-// (dipakai bersama oleh penyesuaian stok, transaksi penjualan, dan refund).
-func insertMovementTx(ctx context.Context, tx pgx.Tx, m *model.Movement) error {
-	return tx.QueryRow(ctx, `
-		INSERT INTO stock_movements (store_id, product_id, type, qty, reason, actor)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at
-	`, m.StoreID, m.ProductID, string(m.Type), m.Qty, m.Reason, m.Actor).Scan(&m.ID, &m.CreatedAt)
-}
-
-// InsertTx menyimpan movement di dalam transaksi yang diberikan.
-func (r *MovementRepo) InsertTx(ctx context.Context, tx pgx.Tx, m *model.Movement) error {
-	return insertMovementTx(ctx, tx, m)
-}
-
-// List riwayat pergerakan toko, terbaru lebih dulu.
 func (r *MovementRepo) List(ctx context.Context, storeID string, f MovementFilter) (*MovementPage, error) {
 	page, limit := f.Page, f.Limit
 	if page < 1 {
@@ -70,51 +44,32 @@ func (r *MovementRepo) List(ctx context.Context, storeID string, f MovementFilte
 		limit = 200
 	}
 
-	conds := []string{"m.store_id = $1"}
-	args := []any{storeID}
+	query := r.db.WithContext(ctx).Model(&model.Movement{}).Where("store_id = ?", storeID)
 	if f.Type != "" {
-		args = append(args, f.Type)
-		conds = append(conds, `m.type = $`+strconv.Itoa(len(args)))
+		query = query.Where("type = ?", f.Type)
 	}
 	if f.ProductID != "" {
-		args = append(args, f.ProductID)
-		conds = append(conds, `m.product_id = $`+strconv.Itoa(len(args)))
+		query = query.Where("product_id = ?", f.ProductID)
 	}
-	where := " WHERE " + strings.Join(conds, " AND ")
 
-	var total int
-	if err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM stock_movements m`+where, args...,
-	).Scan(&total); err != nil {
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
 
-	limitIdx := len(args) + 1
-	offsetIdx := len(args) + 2
-	args = append(args, limit, (page-1)*limit)
-
-	rows, err := r.pool.Query(ctx, `
-		SELECT `+movCols+`
-		FROM stock_movements m LEFT JOIN products p ON p.id = m.product_id
-		`+where+`
-		ORDER BY m.created_at DESC, m.id DESC
-		LIMIT $`+strconv.Itoa(limitIdx)+` OFFSET $`+strconv.Itoa(offsetIdx), args...,
-	)
+	var items = make([]*model.Movement, 0)
+	offset := (page - 1) * limit
+	err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&items).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	items := make([]*model.Movement, 0, limit)
-	for rows.Next() {
-		m, err := scanMovement(rows)
-		if err != nil {
-			return nil, err
+	for _, m := range items {
+		var prod model.Product
+		if err := r.db.WithContext(ctx).First(&prod, "id = ?", m.ProductID).Error; err == nil {
+			m.ProductName = &prod.Name
 		}
-		items = append(items, m)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return &MovementPage{Items: items, Total: total, Page: page, Limit: limit}, nil
+
+	return &MovementPage{Items: items, Total: int(total), Page: page, Limit: limit}, nil
 }

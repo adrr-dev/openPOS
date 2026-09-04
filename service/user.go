@@ -26,7 +26,6 @@ func NewUserService(users *repo.UserRepo, cashiers *repo.CashierRepo) *UserServi
 	return &UserService{users: users, cashiers: cashiers}
 }
 
-// List mengembalikan seluruh akun dalam satu toko (Admin + Cashiers).
 func (s *UserService) List(ctx context.Context, storeID string) ([]model.PublicUser, error) {
 	owners, err := s.users.ListByStore(ctx, storeID)
 	if err != nil {
@@ -51,7 +50,6 @@ func (s *UserService) List(ctx context.Context, storeID string) ([]model.PublicU
 	return out, nil
 }
 
-// CreateCashier membuat akun kasir baru di toko admin (hanya butuh nama).
 func (s *UserService) CreateCashier(ctx context.Context, storeID, name string) (*model.PublicUser, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -71,7 +69,6 @@ func (s *UserService) CreateCashier(ctx context.Context, storeID, name string) (
 	return &pub, nil
 }
 
-// SetActive menonaktifkan/mengaktifkan akun kasir dalam toko yang sama.
 func (s *UserService) SetActive(ctx context.Context, storeID, targetID string, active bool) error {
 	c, err := s.cashiers.GetByID(ctx, targetID)
 	if err != nil {
@@ -86,7 +83,6 @@ func (s *UserService) SetActive(ctx context.Context, storeID, targetID string, a
 	return s.cashiers.SetActive(ctx, targetID, active)
 }
 
-// SetPasscode mengatur passcode untuk admin atau kasir.
 func (s *UserService) SetPasscode(ctx context.Context, storeID, targetID, passcode string) error {
 	passcode = strings.TrimSpace(passcode)
 	var hash *string
@@ -107,13 +103,11 @@ func (s *UserService) SetPasscode(ctx context.Context, storeID, targetID, passco
 		hash = &hs
 	}
 
-	// Cek apakah target adalah kasir
 	c, err := s.cashiers.GetByID(ctx, targetID)
 	if err == nil && c.StoreID == storeID {
 		return s.cashiers.SetPasscode(ctx, targetID, hash)
 	}
 
-	// Cek apakah target adalah admin (owner)
 	owner, err := s.users.GetByID(ctx, targetID)
 	if err == nil && owner.StoreID == storeID {
 		return s.users.SetPasscode(ctx, targetID, hash)

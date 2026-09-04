@@ -2,93 +2,90 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
 
 type OtpRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewOtpRepo(pool *pgxpool.Pool) *OtpRepo {
-	return &OtpRepo{pool: pool}
+func NewOtpRepo(db *gorm.DB) *OtpRepo {
+	return &OtpRepo{db: db}
 }
 
 func (r *OtpRepo) UpsertOTP(ctx context.Context, email, codeHash string, expiresAt time.Time) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO email_otps (email, code_hash, expires_at, attempts, last_sent_at, verified_at, created_at)
-		VALUES ($1, $2, $3, 0, now(), NULL, now())
-		ON CONFLICT (email) DO UPDATE SET
-			code_hash = EXCLUDED.code_hash,
-			expires_at = EXCLUDED.expires_at,
-			attempts = 0,
-			last_sent_at = now(),
-			verified_at = NULL,
-			created_at = now()
-	`, email, codeHash, expiresAt)
-	return err
+	otp := model.EmailOtp{
+		Email:      email,
+		CodeHash:   codeHash,
+		ExpiresAt:  expiresAt,
+		Attempts:   0,
+		LastSentAt: time.Now(),
+		VerifiedAt: nil,
+		CreatedAt:  time.Now(),
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "email"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"code_hash":    codeHash,
+			"expires_at":   expiresAt,
+			"attempts":     0,
+			"last_sent_at": time.Now(),
+			"verified_at":  nil,
+			"created_at":   time.Now(),
+		}),
+	}).Create(&otp).Error
 }
 
 func (r *OtpRepo) GetOTP(ctx context.Context, email string) (*model.EmailOtp, error) {
 	var o model.EmailOtp
-	var verifiedAt *time.Time
-	err := r.pool.QueryRow(ctx, `
-		SELECT email, code_hash, expires_at, attempts, last_sent_at, verified_at, created_at
-		FROM email_otps WHERE email = $1
-	`, email).Scan(&o.Email, &o.CodeHash, &o.ExpiresAt, &o.Attempts, &o.LastSentAt, &verifiedAt, &o.CreatedAt)
+	err := r.db.WithContext(ctx).Where("email = ?", email).First(&o).Error
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+		return nil, mapDBErr(err)
 	}
-	o.VerifiedAt = verifiedAt
 	return &o, nil
 }
 
 func (r *OtpRepo) IncrementAttempts(ctx context.Context, email string) (int, error) {
-	var attempts int
-	err := r.pool.QueryRow(ctx, `
-		UPDATE email_otps SET attempts = attempts + 1 WHERE email = $1 RETURNING attempts
-	`, email).Scan(&attempts)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, ErrNotFound
+	var o model.EmailOtp
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("email = ?", email).First(&o).Error; err != nil {
+			return err
 		}
-		return 0, err
+		o.Attempts++
+		return tx.Save(&o).Error
+	})
+	if err != nil {
+		return 0, mapDBErr(err)
 	}
-	return attempts, nil
+	return o.Attempts, nil
 }
 
 func (r *OtpRepo) MarkVerified(ctx context.Context, email string) error {
-	ct, err := r.pool.Exec(ctx, `
-		UPDATE email_otps SET verified_at = now() WHERE email = $1
-	`, email)
-	if err != nil {
-		return err
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&model.EmailOtp{}).Where("email = ?", email).Update("verified_at", &now)
+	if res.Error != nil {
+		return res.Error
 	}
-	if ct.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (r *OtpRepo) IsEmailVerified(ctx context.Context, email string) (bool, error) {
-	var verified bool
-	err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM email_otps WHERE email = $1 AND verified_at IS NOT NULL
-		)
-	`, email).Scan(&verified)
-	return verified, err
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.EmailOtp{}).Where("email = ? AND verified_at IS NOT NULL", email).Count(&count).Error
+	return count > 0, err
 }
 
 func (r *OtpRepo) RevokeOTP(ctx context.Context, email string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE email_otps SET attempts = 3, verified_at = NULL WHERE email = $1`, email)
-	return err
+	return r.db.WithContext(ctx).Model(&model.EmailOtp{}).Where("email = ?", email).Updates(map[string]interface{}{
+		"attempts":    3,
+		"verified_at": nil,
+	}).Error
 }

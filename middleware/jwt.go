@@ -1,66 +1,54 @@
 package middleware
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/service"
 )
 
-type ctxKey string
+const claimsKey = "claims"
 
-const claimsKey ctxKey = "claims"
-
-// Auth memvalidasi Bearer access token dan menyimpan claims ke context.
-func Auth(authSvc *service.AuthService) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			if !strings.HasPrefix(header, "Bearer ") {
-				writeError(w, http.StatusUnauthorized, "token tidak disertakan")
-				return
-			}
-			claims, err := authSvc.ParseAccess(strings.TrimPrefix(header, "Bearer "))
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
-				return
-			}
-			ctx := context.WithValue(r.Context(), claimsKey, claims)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+func Auth(authSvc *service.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(401, gin.H{"error": "token tidak disertakan"})
+			return
+		}
+		claims, err := authSvc.ParseAccess(strings.TrimPrefix(header, "Bearer "))
+		if err != nil {
+			c.AbortWithStatusJSON(401, gin.H{"error": "sesi tidak valid, silakan masuk kembali"})
+			return
+		}
+		c.Set(claimsKey, claims)
+		c.Next()
 	}
 }
 
-// RequireRole membatasi akses berdasarkan peran (dipakai modul berikutnya).
-func RequireRole(roles ...string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			c := ClaimsFrom(r.Context())
-			if c == nil {
-				writeError(w, http.StatusUnauthorized, "sesi tidak valid")
+func RequireRole(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := ClaimsFrom(c)
+		if claims == nil {
+			c.AbortWithStatusJSON(401, gin.H{"error": "sesi tidak valid"})
+			return
+		}
+		for _, role := range roles {
+			if string(claims.Role) == role {
+				c.Next()
 				return
 			}
-			for _, role := range roles {
-				if string(c.Role) == role {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			writeError(w, http.StatusForbidden, "akses ditolak untuk peran Anda")
-		})
+		}
+		c.AbortWithStatusJSON(403, gin.H{"error": "akses ditolak untuk peran Anda"})
 	}
 }
 
-// ClaimsFrom mengambil claims user dari context (nil bila belum terautentikasi).
-func ClaimsFrom(ctx context.Context) *service.Claims {
-	c, _ := ctx.Value(claimsKey).(*service.Claims)
-	return c
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+func ClaimsFrom(c *gin.Context) *service.Claims {
+	v, exists := c.Get(claimsKey)
+	if !exists {
+		return nil
+	}
+	claims, _ := v.(*service.Claims)
+	return claims
 }

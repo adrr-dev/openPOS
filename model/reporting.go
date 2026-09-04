@@ -2,7 +2,6 @@ package model
 
 import "time"
 
-// StoreSettings adalah konfigurasi toko (DTO camelCase untuk klien).
 type StoreSettings struct {
 	Name          string  `json:"storeName"`
 	Address       string  `json:"address"`
@@ -15,10 +14,8 @@ type StoreSettings struct {
 	Timezone      string  `json:"timezone"`
 }
 
-// ── dashboard ────────────────────────────────────────────────────────
-
 type DayPoint struct {
-	Date  string `json:"date"` // YYYY-MM-DD (zona waktu toko)
+	Date  string `json:"date"`
 	Omzet int64  `json:"omzet"`
 }
 
@@ -64,8 +61,6 @@ type DashboardCashier struct {
 	Recent []TrxBrief     `json:"recent"`
 }
 
-// ── laporan ──────────────────────────────────────────────────────────
-
 type ReportSummary struct {
 	Omzet       int64 `json:"omzet"`
 	TrxCount    int64 `json:"trx_count"`
@@ -107,7 +102,6 @@ type StatusCount struct {
 	Count  int64     `json:"count"`
 }
 
-// ReportBundle: seluruh isi laporan untuk satu periode (dataset UMKM kecil).
 type ReportBundle struct {
 	Period       string             `json:"period"`
 	Summary      ReportSummary      `json:"summary"`

@@ -4,33 +4,30 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+
+	"github.com/0xMinomus/openPOS/backend/model"
 )
 
-type RefreshToken struct {
-	UserID    string
-	ExpiresAt time.Time
-	Revoked   bool
-}
-
 type RefreshRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewRefreshRepo(pool *pgxpool.Pool) *RefreshRepo { return &RefreshRepo{pool: pool} }
+func NewRefreshRepo(db *gorm.DB) *RefreshRepo { return &RefreshRepo{db: db} }
 
 func (r *RefreshRepo) Create(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)
-	`, userID, tokenHash, expiresAt)
-	return err
+	rt := model.RefreshToken{
+		UserID:    userID,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		Revoked:   false,
+	}
+	return r.db.WithContext(ctx).Create(&rt).Error
 }
 
-func (r *RefreshRepo) GetActiveByHash(ctx context.Context, tokenHash string) (*RefreshToken, error) {
-	var rt RefreshToken
-	err := r.pool.QueryRow(ctx, `
-		SELECT user_id, expires_at, revoked FROM refresh_tokens WHERE token_hash = $1
-	`, tokenHash).Scan(&rt.UserID, &rt.ExpiresAt, &rt.Revoked)
+func (r *RefreshRepo) GetActiveByHash(ctx context.Context, tokenHash string) (*model.RefreshToken, error) {
+	var rt model.RefreshToken
+	err := r.db.WithContext(ctx).Where("token_hash = ?", tokenHash).First(&rt).Error
 	if err != nil {
 		return nil, mapDBErr(err)
 	}
@@ -38,11 +35,9 @@ func (r *RefreshRepo) GetActiveByHash(ctx context.Context, tokenHash string) (*R
 }
 
 func (r *RefreshRepo) Revoke(ctx context.Context, tokenHash string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1`, tokenHash)
-	return err
+	return r.db.WithContext(ctx).Model(&model.RefreshToken{}).Where("token_hash = ?", tokenHash).Update("revoked", true).Error
 }
 
 func (r *RefreshRepo) RevokeAllForUser(ctx context.Context, userID string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1`, userID)
-	return err
+	return r.db.WithContext(ctx).Model(&model.RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }

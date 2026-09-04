@@ -2,18 +2,23 @@ package repo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
+
+// isPostgres reports whether the dialector supports pg locks (FOR UPDATE,
+// pg_advisory_xact_lock). Sqlite path skips them — same results, no crash.
+func (r *TrxRepo) isPostgres() bool {
+	return r.db.Dialector.Name() != "sqlite"
+}
 
 var (
 	ErrPaidInsufficient = errors.New("jumlah bayar kurang dari total")
@@ -40,28 +45,12 @@ type CheckoutInput struct {
 	Customer    string
 }
 
-const trxCols = `t.id, t.seq, t.cashier_id, t.cashier_name, t.subtotal, t.discount,
-	t.tax, t.total, t.method, t.paid, t.change, t.status, t.customer, t.created_at`
-
-func scanTrx(row interface{ Scan(...any) error }) (*model.Trx, error) {
-	var t model.Trx
-	if err := row.Scan(&t.ID, &t.Seq, &t.CashierID, &t.CashierName, &t.Subtotal, &t.Discount,
-		&t.Tax, &t.Total, &t.Method, &t.Paid, &t.Change, &t.Status, &t.Customer, &t.CreatedAt); err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
 type TrxRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewTrxRepo(pool *pgxpool.Pool) *TrxRepo { return &TrxRepo{pool: pool} }
+func NewTrxRepo(db *gorm.DB) *TrxRepo { return &TrxRepo{db: db} }
 
-// Checkout menjalankan seluruh alur penjualan dalam SATU transaksi DB:
-// advisory-lock per toko (EC-001) → kunci produk (FOR UPDATE) → validasi stok &
-// hitung ulang harga di server → seq per toko → insert trx+items → kurangi stok
-// → movement 'sale'. (FR-POS-005..009)
 func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, error) {
 	if len(in.Items) == 0 {
 		return nil, ErrEmptyItems
@@ -70,8 +59,6 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 		return nil, fmt.Errorf("metode pembayaran tidak valid")
 	}
 
-	// Gabungkan baris dengan produk yang sama (klien yang buruk pun tak boleh
-	// membuat duplikat baris item untuk satu produk).
 	merged := make([]CheckoutItem, 0, len(in.Items))
 	idx := map[string]int{}
 	for _, it := range in.Items {
@@ -84,143 +71,164 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 	}
 	in.Items = merged
 
-	tx, err := r.pool.Begin(ctx)
+	var resultTrx *model.Trx
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize checkouts per store on postgres like old backend
+		// (SELECT pg_advisory_xact_lock). Skipped on sqlite.
+		if r.isPostgres() {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", in.StoreID).Error; err != nil {
+				return err
+			}
+		}
+
+		var store model.Store
+		if err := tx.Where("id = ?", in.StoreID).First(&store).Error; err != nil {
+			return mapDBErr(err)
+		}
+
+		type line struct {
+			item model.TrxItem
+			qty  int
+		}
+		lines := make([]line, 0, len(in.Items))
+		var subtotal int64
+
+		for _, it := range in.Items {
+			if it.Qty < 1 {
+				return fmt.Errorf("qty harus minimal 1")
+			}
+			var prod model.Product
+			q := tx
+			// FOR UPDATE row lock on postgres prevents concurrent oversell.
+			if r.isPostgres() {
+				q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			if err := q.Where("id = ? AND store_id = ?", it.ProductID, in.StoreID).First(&prod).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrNotFound
+				}
+				return err
+			}
+			if !prod.Active {
+				return ErrProductInactive
+			}
+			if prod.Stock < it.Qty {
+				return ErrStockInsufficient
+			}
+
+			pi := model.TrxItem{
+				ProductID: prod.ID,
+				Name:      prod.Name,
+				BuyPrice:  prod.BuyPrice,
+				Price:     prod.SellPrice,
+				Qty:       it.Qty,
+			}
+			subtotal += pi.Price * int64(it.Qty)
+			lines = append(lines, line{item: pi, qty: it.Qty})
+		}
+
+		discount := in.Discount
+		if discount < 0 || discount > subtotal {
+			return ErrBadDiscount
+		}
+
+		var tax int64
+		if store.TaxEnabled && store.TaxPct > 0 {
+			tax = roundHalfUp(float64(subtotal-discount) * store.TaxPct / 100)
+		}
+		total := subtotal - discount + tax
+
+		paid, change := in.Paid, int64(0)
+		if in.Method == string(model.PayCash) {
+			if paid < total {
+				return ErrPaidInsufficient
+			}
+			change = paid - total
+		} else {
+			paid = total
+		}
+
+		var maxSeq int64
+		tx.Model(&model.Trx{}).Select("COALESCE(MAX(seq), 0)").Scan(&maxSeq)
+		seq := int(maxSeq) + 1
+		id := "TRX-" + pad4(seq)
+
+		trxItemsList := make(model.TrxItemList, len(lines))
+		for i, l := range lines {
+			trxItemsList[i] = l.item
+		}
+
+		trx := model.Trx{
+			ID:          id,
+			Seq:         seq,
+			StoreID:     in.StoreID,
+			CashierID:   in.CashierID,
+			CashierName: in.CashierName,
+			Items:       trxItemsList,
+			Subtotal:    subtotal,
+			Discount:    discount,
+			Tax:         tax,
+			Total:       total,
+			Method:      in.Method,
+			Paid:        paid,
+			Change:      change,
+			Status:      model.TrxCompleted,
+			Customer:    in.Customer,
+			CreatedAt:   time.Now(),
+		}
+
+		if err := tx.Create(&trx).Error; err != nil {
+			return mapDBErr(err)
+		}
+
+		for _, l := range lines {
+			tItem := model.TransactionItem{
+				TrxID:     id,
+				ProductID: l.item.ProductID,
+				Name:      l.item.Name,
+				BuyPrice:  l.item.BuyPrice,
+				Price:     l.item.Price,
+				Qty:       l.qty,
+			}
+			if err := tx.Create(&tItem).Error; err != nil {
+				return err
+			}
+
+			// Atomic decrement with guard — catches race between check and write.
+			res := tx.Model(&model.Product{}).
+				Where("id = ? AND store_id = ? AND stock >= ?", l.item.ProductID, in.StoreID, l.qty).
+				Update("stock", gorm.Expr("stock - ?", l.qty))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return ErrStockInsufficient
+			}
+
+			mv := model.Movement{
+				StoreID:   in.StoreID,
+				ProductID: l.item.ProductID,
+				Type:      model.MovementSale,
+				Qty:       -l.qty,
+				Reason:    "Penjualan " + id,
+				Actor:     in.CashierName,
+			}
+			if err := tx.Create(&mv).Error; err != nil {
+				return err
+			}
+		}
+
+		resultTrx = &trx
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	// serialisasi seluruh checkout dalam toko yang sama
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, in.StoreID); err != nil {
-		return nil, err
-	}
-
-	// pengaturan pajak toko
-	var taxEnabled bool
-	var taxPct float64
-	if err := tx.QueryRow(ctx,
-		`SELECT tax_enabled, tax_pct FROM stores WHERE id = $1`, in.StoreID,
-	).Scan(&taxEnabled, &taxPct); err != nil {
-		return nil, mapDBErr(err)
-	}
-
-	type line struct {
-		item model.TrxItem
-		qty  int
-	}
-	lines := make([]line, 0, len(in.Items))
-	var subtotal int64
-
-	for _, it := range in.Items {
-		if it.Qty < 1 {
-			return nil, fmt.Errorf("qty harus minimal 1")
-		}
-		var pi model.TrxItem
-		var stock int
-		var active bool
-		err := tx.QueryRow(ctx, `
-			SELECT id, name, buy_price, sell_price, stock, active
-			FROM products WHERE id = $1 AND store_id = $2 FOR UPDATE
-		`, it.ProductID, in.StoreID).Scan(&pi.ProductID, &pi.Name, &pi.BuyPrice, &pi.Price, &stock, &active)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, mapDBErr(err)
-		}
-		if !active {
-			return nil, ErrProductInactive
-		}
-		if stock < it.Qty {
-			return nil, ErrStockInsufficient
-		}
-		pi.Qty = it.Qty
-		subtotal += pi.Price * int64(it.Qty)
-		lines = append(lines, line{item: pi, qty: it.Qty})
-	}
-
-	discount := in.Discount
-	if discount < 0 || discount > subtotal {
-		return nil, ErrBadDiscount
-	}
-	var tax int64
-	if taxEnabled && taxPct > 0 {
-		tax = roundHalfUp(float64(subtotal-discount) * taxPct / 100)
-	}
-	total := subtotal - discount + tax
-
-	paid, change := in.Paid, int64(0)
-	if in.Method == string(model.PayCash) {
-		if paid < total {
-			return nil, ErrPaidInsufficient
-		}
-		change = paid - total
-	} else {
-		paid = total // non-cash dicatat persis total
-	}
-
-	var seq int
-	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM transactions`,
-	).Scan(&seq); err != nil {
-		return nil, err
-	}
-	id := "TRX-" + pad4(seq)
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO transactions (id, seq, store_id, cashier_id, cashier_name,
-			subtotal, discount, tax, total, method, paid, change, status, customer)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'completed',$13)
-	`, id, seq, in.StoreID, in.CashierID, in.CashierName,
-		subtotal, discount, tax, total, in.Method, paid, change, in.Customer); err != nil {
-		return nil, mapDBErr(err)
-	}
-
-	for _, l := range lines {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO transaction_items (trx_id, product_id, name, buy_price, price, qty)
-			VALUES ($1,$2,$3,$4,$5,$6)
-		`, id, l.item.ProductID, l.item.Name, l.item.BuyPrice, l.item.Price, l.qty); err != nil {
-			return nil, mapDBErr(err)
-		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE products SET stock = stock - $3 WHERE id = $1 AND store_id = $2`,
-			l.item.ProductID, in.StoreID, l.qty); err != nil {
-			return nil, err
-		}
-		if err := insertMovementTx(ctx, tx, &model.Movement{
-			StoreID:   in.StoreID,
-			ProductID: l.item.ProductID,
-			Type:      model.MovementSale,
-			Qty:       -l.qty,
-			Reason:    "Penjualan " + id,
-			Actor:     in.CashierName,
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-
-	out := &model.Trx{
-		ID: id, Seq: seq, CashierID: in.CashierID, CashierName: in.CashierName,
-		Items:    make([]model.TrxItem, 0, len(lines)),
-		Subtotal: subtotal, Discount: discount, Tax: tax, Total: total,
-		Method: in.Method, Paid: paid, Change: change,
-		Status: model.TrxCompleted, Customer: in.Customer, CreatedAt: time.Now(),
-	}
-	for _, l := range lines {
-		l.item.Qty = l.qty
-		out.Items = append(out.Items, l.item)
-	}
-	return out, nil
+	return resultTrx, nil
 }
 
-// Refund memproses refund parsial/penuh (FR-REF-001..005):
-// kunci trx → tolak bila bukan 'completed' atau dobel melebihi terjual (EC-004)
-// → kembalikan stok + movement 'refund' → catat refunds → status 'refunded' bila penuh.
 func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[string]int, reason, byName string) (*model.Trx, error) {
 	if len(items) == 0 {
 		return nil, ErrEmptyItems
@@ -229,151 +237,130 @@ func (r *TrxRepo) Refund(ctx context.Context, storeID, trxID string, items map[s
 		return nil, fmt.Errorf("alasan refund wajib diisi")
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if r.isPostgres() {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", storeID).Error; err != nil {
+				return err
+			}
+		}
+		var t model.Trx
+		q := tx
+		if r.isPostgres() {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := q.Where("id = ? AND store_id = ?", trxID, storeID).First(&t).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if t.Status != model.TrxCompleted {
+			return ErrNotRefundable
+		}
+
+		var tItems []model.TransactionItem
+		if err := tx.Where("trx_id = ?", trxID).Find(&tItems).Error; err != nil {
+			return err
+		}
+
+		sold := map[string]model.TrxItem{}
+		for _, ti := range tItems {
+			if prev, ok := sold[ti.ProductID]; ok {
+				prev.Qty += ti.Qty
+				sold[ti.ProductID] = prev
+			} else {
+				sold[ti.ProductID] = model.TrxItem{
+					ProductID: ti.ProductID,
+					Name:      ti.Name,
+					BuyPrice:  ti.BuyPrice,
+					Price:     ti.Price,
+					Qty:       ti.Qty,
+				}
+			}
+		}
+
+		var refunds []model.Refund
+		if err := tx.Where("trx_id = ?", trxID).Find(&refunds).Error; err != nil {
+			return err
+		}
+
+		refunded := map[string]int{}
+		for _, ref := range refunds {
+			for pid, q := range ref.Items {
+				refunded[pid] += q
+			}
+		}
+
+		processed := model.RefundItemList{}
+		for pid, want := range items {
+			s, ok := sold[pid]
+			if !ok || want < 0 {
+				return ErrRefundTooMuch
+			}
+			if want == 0 {
+				continue
+			}
+			if refunded[pid]+want > s.Qty {
+				return ErrRefundTooMuch
+			}
+
+			if err := tx.Model(&model.Product{}).Where("id = ? AND store_id = ?", pid, storeID).Update("stock", gorm.Expr("stock + ?", want)).Error; err != nil {
+				return err
+			}
+
+			mv := model.Movement{
+				StoreID:   storeID,
+				ProductID: pid,
+				Type:      model.MovementRefund,
+				Qty:       want,
+				Reason:    "Refund " + trxID,
+				Actor:     byName,
+			}
+			if err := tx.Create(&mv).Error; err != nil {
+				return err
+			}
+
+			processed[pid] = want
+		}
+
+		if len(processed) == 0 {
+			return ErrEmptyItems
+		}
+
+		full := true
+		for pid, s := range sold {
+			if refunded[pid]+processed[pid] < s.Qty {
+				full = false
+				break
+			}
+		}
+
+		refRecord := model.Refund{
+			StoreID: storeID,
+			TrxID:   trxID,
+			Items:   processed,
+			Reason:  strings.TrimSpace(reason),
+			ByName:  byName,
+		}
+		if err := tx.Create(&refRecord).Error; err != nil {
+			return err
+		}
+
+		if full {
+			if err := tx.Model(&model.Trx{}).Where("id = ? AND store_id = ?", trxID, storeID).Update("status", model.TrxRefunded).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, storeID); err != nil {
-		return nil, err
-	}
-
-	t, err := scanTrx(tx.QueryRow(ctx, `
-		SELECT `+trxCols+` FROM transactions t WHERE t.id = $1 AND t.store_id = $2 FOR UPDATE
-	`, trxID, storeID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, mapDBErr(err)
-	}
-	if t.Status != model.TrxCompleted {
-		return nil, ErrNotRefundable
-	}
-
-	// item terjual
-	sold := make(map[string]model.TrxItem)
-	rows, err := tx.Query(ctx,
-		`SELECT product_id, name, buy_price, price, qty FROM transaction_items WHERE trx_id = $1`, trxID)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var it model.TrxItem
-		if err := rows.Scan(&it.ProductID, &it.Name, &it.BuyPrice, &it.Price, &it.Qty); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		// baris duplikat untuk produk yang sama dijumlahkan (data lama pra-perbaikan)
-		if prev, ok := sold[it.ProductID]; ok {
-			prev.Qty += it.Qty
-			sold[it.ProductID] = prev
-		} else {
-			sold[it.ProductID] = it
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// qty yang sudah direfund sebelumnya (refund parsial berulang diperbolehkan)
-	refunded := make(map[string]int)
-	rrows, err := tx.Query(ctx, `SELECT items FROM refunds WHERE trx_id = $1`, trxID)
-	if err != nil {
-		return nil, err
-	}
-	for rrows.Next() {
-		var raw []byte
-		if err := rrows.Scan(&raw); err != nil {
-			rrows.Close()
-			return nil, err
-		}
-		var m map[string]int
-		if err := json.Unmarshal(raw, &m); err != nil {
-			rrows.Close()
-			return nil, err
-		}
-		for pid, q := range m {
-			refunded[pid] += q
-		}
-	}
-	rrows.Close()
-	if err := rrows.Err(); err != nil {
-		return nil, err
-	}
-
-	full := true
-	processed := make(map[string]int, len(items))
-	for pid, want := range items {
-		s, ok := sold[pid]
-		if !ok || want < 0 {
-			return nil, ErrRefundTooMuch
-		}
-		if want == 0 {
-			continue
-		}
-		if refunded[pid]+want > s.Qty {
-			return nil, ErrRefundTooMuch
-		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE products SET stock = stock + $3 WHERE id = $1 AND store_id = $2`,
-			pid, storeID, want); err != nil {
-			return nil, err
-		}
-		if err := insertMovementTx(ctx, tx, &model.Movement{
-			StoreID:   storeID,
-			ProductID: pid,
-			Type:      model.MovementRefund,
-			Qty:       want,
-			Reason:    "Refund " + trxID,
-			Actor:     byName,
-		}); err != nil {
-			return nil, err
-		}
-		processed[pid] = want
-	}
-	if len(processed) == 0 {
-		return nil, ErrEmptyItems
-	}
-	// penuh hanya bila SETIAP item terjual kini sudah kembali seluruhnya
-	for pid, s := range sold {
-		if refunded[pid]+processed[pid] < s.Qty {
-			full = false
-			break
-		}
-	}
-
-	rawItems, err := json.Marshal(processed)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO refunds (store_id, trx_id, items, reason, by_name)
-		VALUES ($1, $2, $3::jsonb, $4, $5)
-	`, storeID, trxID, string(rawItems), strings.TrimSpace(reason), byName); err != nil {
-		return nil, err
-	}
-
-	if full {
-		if _, err := tx.Exec(ctx,
-			`UPDATE transactions SET status = 'refunded' WHERE id = $1 AND store_id = $2`, trxID, storeID); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-
-	fresh, err := r.GetByID(ctx, storeID, trxID)
-	if err != nil {
-		return nil, err
-	}
-	return fresh, nil
+	return r.GetByID(ctx, storeID, trxID)
 }
 
-// List daftar transaksi; kasir otomatis dibatasi miliknya (cashierID ≠ ""). Items disertakan.
 func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date string, page, limit int) ([]*model.Trx, int, error) {
 	if page < 1 {
 		page = 1
@@ -385,129 +372,86 @@ func (r *TrxRepo) List(ctx context.Context, storeID, cashierID, q, method, date 
 		limit = 200
 	}
 
-	conds := []string{"t.store_id = $1"}
-	args := []any{storeID}
+	query := r.db.WithContext(ctx).Model(&model.Trx{}).Where("store_id = ?", storeID)
 	if cashierID != "" {
-		args = append(args, cashierID)
-		conds = append(conds, `t.cashier_id = $`+strconv.Itoa(len(args)))
+		query = query.Where("cashier_id = ?", cashierID)
 	}
 	if qs := strings.TrimSpace(q); qs != "" {
-		args = append(args, "%"+strings.ToLower(qs)+"%")
-		n := len(args)
-		conds = append(conds, `(lower(t.id) LIKE $`+strconv.Itoa(n)+` OR lower(t.cashier_name) LIKE $`+strconv.Itoa(n)+`)`)
+		searchTerm := "%" + strings.ToLower(qs) + "%"
+		query = query.Where("lower(id) LIKE ? OR lower(cashier_name) LIKE ?", searchTerm, searchTerm)
 	}
 	if method != "" {
-		args = append(args, method)
-		conds = append(conds, `t.method = $`+strconv.Itoa(len(args)))
+		query = query.Where("method = ?", method)
 	}
 	if date != "" {
-		args = append(args, date)
-		conds = append(conds, `t.created_at::date = $`+strconv.Itoa(len(args))+`::date`)
+		if r.db.Dialector.Name() == "sqlite" {
+			query = query.Where("date(created_at) = date(?)", date)
+		} else {
+			query = query.Where("created_at::date = ?::date", date)
+		}
 	}
-	where := " WHERE " + strings.Join(conds, " AND ")
 
-	var total int
-	if err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM transactions t`+where, args...,
-	).Scan(&total); err != nil {
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	limitIdx := len(args) + 1
-	offsetIdx := len(args) + 2
-	args = append(args, limit, (page-1)*limit)
-
-	rows, err := r.pool.Query(ctx, `
-		SELECT `+trxCols+` FROM transactions t`+where+`
-		ORDER BY t.created_at DESC, t.seq DESC
-		LIMIT $`+strconv.Itoa(limitIdx)+` OFFSET $`+strconv.Itoa(offsetIdx), args...,
-	)
+	list := make([]*model.Trx, 0)
+	offset := (page - 1) * limit
+	err := query.Order("created_at DESC, seq DESC").Limit(limit).Offset(offset).Find(&list).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
 
-	list := make([]*model.Trx, 0, limit)
-	for rows.Next() {
-		t, err := scanTrx(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		t.Items = []model.TrxItem{}
-		list = append(list, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
 	if len(list) > 0 {
 		ids := make([]string, len(list))
 		for i, t := range list {
 			ids[i] = t.ID
 		}
-		if err := attachTrxItems(ctx, r.pool, list, ids); err != nil {
-			return nil, 0, err
+		var items []model.TransactionItem
+		if err := r.db.WithContext(ctx).Where("trx_id IN ?", ids).Order("id ASC").Find(&items).Error; err == nil {
+			byID := map[string]*model.Trx{}
+			for _, t := range list {
+				t.Items = []model.TrxItem{}
+				byID[t.ID] = t
+			}
+			for _, it := range items {
+				if t, ok := byID[it.TrxID]; ok {
+					t.Items = append(t.Items, model.TrxItem{
+						ProductID: it.ProductID,
+						Name:      it.Name,
+						BuyPrice:  it.BuyPrice,
+						Price:     it.Price,
+						Qty:       it.Qty,
+					})
+				}
+			}
 		}
 	}
-	return list, total, nil
+
+	return list, int(total), nil
 }
 
-// rowQuerier diimplementasikan pgxpool.Pool (dan tx bila perlu).
-type rowQuerier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-}
-
-func attachTrxItems(ctx context.Context, q rowQuerier, list []*model.Trx, ids []string) error {
-	irows, err := q.Query(ctx, `
-		SELECT trx_id, product_id, name, buy_price, price, qty
-		FROM transaction_items WHERE trx_id = ANY($1)
-		ORDER BY id ASC
-	`, ids)
-	if err != nil {
-		return err
-	}
-	defer irows.Close()
-
-	byID := make(map[string]*model.Trx, len(list))
-	for _, t := range list {
-		byID[t.ID] = t
-	}
-	for irows.Next() {
-		var tid string
-		var it model.TrxItem
-		if err := irows.Scan(&tid, &it.ProductID, &it.Name, &it.BuyPrice, &it.Price, &it.Qty); err != nil {
-			return err
-		}
-		if t, ok := byID[tid]; ok {
-			t.Items = append(t.Items, it)
-		}
-	}
-	return irows.Err()
-}
-
-// GetByID detail transaksi beserta item.
 func (r *TrxRepo) GetByID(ctx context.Context, storeID, id string) (*model.Trx, error) {
-	t, err := scanTrx(r.pool.QueryRow(ctx, `
-		SELECT `+trxCols+` FROM transactions t WHERE t.id = $1 AND t.store_id = $2
-	`, id, storeID))
-	if err != nil {
+	var t model.Trx
+	if err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&t).Error; err != nil {
 		return nil, mapDBErr(err)
 	}
+
 	t.Items = []model.TrxItem{}
-	irows, err := r.pool.Query(ctx, `
-		SELECT product_id, name, buy_price, price, qty FROM transaction_items WHERE trx_id = $1 ORDER BY id ASC
-	`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer irows.Close()
-	for irows.Next() {
-		var it model.TrxItem
-		if err := irows.Scan(&it.ProductID, &it.Name, &it.BuyPrice, &it.Price, &it.Qty); err != nil {
-			return nil, err
+	var items []model.TransactionItem
+	if err := r.db.WithContext(ctx).Where("trx_id = ?", id).Order("id ASC").Find(&items).Error; err == nil {
+		for _, it := range items {
+			t.Items = append(t.Items, model.TrxItem{
+				ProductID: it.ProductID,
+				Name:      it.Name,
+				BuyPrice:  it.BuyPrice,
+				Price:     it.Price,
+				Qty:       it.Qty,
+			})
 		}
-		t.Items = append(t.Items, it)
 	}
-	return t, irows.Err()
+	return &t, nil
 }
 
 func pad4(n int) string {

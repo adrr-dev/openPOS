@@ -1,10 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/middleware"
 	"github.com/0xMinomus/openPOS/backend/repo"
@@ -17,53 +18,51 @@ type StockHandler struct {
 
 func NewStockHandler(svc *service.CatalogService) *StockHandler { return &StockHandler{svc: svc} }
 
-// ListMovements — GET /api/v1/movements?type=&productId=&page=&limit= 🔒 admin
-func (h *StockHandler) ListMovements(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	q := r.URL.Query()
+func (h *StockHandler) ListMovements(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	q := c.Query
 
-	f := repo.MovementFilter{Type: q.Get("type"), ProductID: q.Get("productId")}
-	if v := q.Get("page"); v != "" {
+	f := repo.MovementFilter{Type: q("type"), ProductID: q("productId")}
+	if v := q("page"); v != "" {
 		f.Page, _ = strconv.Atoi(v)
 	}
-	if v := q.Get("limit"); v != "" {
+	if v := q("limit"); v != "" {
 		f.Limit, _ = strconv.Atoi(v)
 	}
 
-	pageData, err := h.svc.ListMovements(r.Context(), c.StoreID, f)
+	pageData, err := h.svc.ListMovements(c.Request.Context(), claims.StoreID, f)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Gagal memuat riwayat pergerakan.")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat riwayat pergerakan."})
 		return
 	}
-	writeJSON(w, http.StatusOK, pageData)
+	c.JSON(http.StatusOK, pageData)
 }
 
 type adjustReq struct {
 	ProductID string `json:"productId"`
-	Direction string `json:"direction"` // plus | minus
+	Direction string `json:"direction"`
 	Qty       int64  `json:"qty"`
 	Reason    string `json:"reason"`
 }
 
-// AdjustStock — POST /api/v1/stock/adjustments 🔒 admin (FR-INV-002/003/006/007)
-func (h *StockHandler) AdjustStock(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *StockHandler) AdjustStock(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req adjustReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	p, err := h.svc.AdjustStock(r.Context(), c.StoreID, req.ProductID, c.Name, req.Direction, req.Qty, req.Reason)
+	p, err := h.svc.AdjustStock(c.Request.Context(), claims.StoreID, req.ProductID, claims.Name, req.Direction, req.Qty, req.Reason)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrBadDirection):
-			writeError(w, http.StatusBadRequest, "arah penyesuaian harus 'plus' atau 'minus'")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "arah penyesuaian harus 'plus' atau 'minus'"})
 		case errors.Is(err, service.ErrStoreMismatch):
-			writeError(w, http.StatusNotFound, "Produk tidak ditemukan.")
+			c.JSON(http.StatusNotFound, gin.H{"error": "Produk tidak ditemukan."})
 		default:
-			writeError(w, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"product": p})
+	c.JSON(http.StatusOK, gin.H{"product": p})
 }

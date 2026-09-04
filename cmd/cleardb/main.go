@@ -15,14 +15,14 @@ func main() {
 		log.Fatalf("config load error: %v", err)
 	}
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	database, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("db connect error: %v", err)
 	}
-	defer pool.Close()
+	sqlDB, _ := database.DB()
+	defer sqlDB.Close()
 
-	_, err = pool.Exec(ctx, "TRUNCATE TABLE stores, email_otps RESTART IDENTITY CASCADE;")
-	if err != nil {
+	if err := database.Exec("TRUNCATE TABLE stores, email_otps RESTART IDENTITY CASCADE;").Error; err != nil {
 		log.Fatalf("truncate error: %v", err)
 	}
 

@@ -1,7 +1,3 @@
-// Package router menyatukan seluruh dependensi aplikasi (config, DB, handler,
-// route chi) menjadi satu http.Handler yang dapat dipakai dua pintu:
-//   - server jangka panjang (cmd/api) untuk lokal/VPS
-//   - fungsi serverless Vercel (api/index.go)
 package router
 
 import (
@@ -10,9 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/config"
 	"github.com/0xMinomus/openPOS/backend/db"
@@ -23,42 +18,42 @@ import (
 	"github.com/0xMinomus/openPOS/backend/service"
 )
 
-// Server adalah hasil penyusunan aplikasi.
 type Server struct {
 	Handler http.Handler
 	Port    string
-	Cleanup func() // tutup koneksi DB (aman dipanggil berulang)
+	Cleanup func()
 }
 
-// New memuat config, menghubungkan & memigrasikan database, lalu merakit route.
 func New(ctx context.Context) (*Server, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	database, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
-	cleanup := func() { pool.Close() }
+	sqlDB, _ := database.DB()
+	cleanup := func() { _ = sqlDB.Close() }
 
-	if err := db.Migrate(context.Background(), pool); err != nil {
+	if err := db.Migrate(database); err != nil {
 		cleanup()
 		return nil, err
 	}
-	log.Println("migrasi: ok")
+	log.Println("migrasi GORM: ok")
 
-	userRepo := repo.NewUserRepo(pool)
-	cashierRepo := repo.NewCashierRepo(pool)
-	refreshRepo := repo.NewRefreshRepo(pool)
-	otpRepo := repo.NewOtpRepo(pool)
-	categoryRepo := repo.NewCategoryRepo(pool)
-	productRepo := repo.NewProductRepo(pool)
-	movementRepo := repo.NewMovementRepo(pool)
-	trxRepo := repo.NewTrxRepo(pool)
-	storeRepo := repo.NewStoreRepo(pool)
-	reportRepo := repo.NewReportRepo(pool)
+	userRepo := repo.NewUserRepo(database)
+	cashierRepo := repo.NewCashierRepo(database)
+	refreshRepo := repo.NewRefreshRepo(database)
+	otpRepo := repo.NewOtpRepo(database)
+	categoryRepo := repo.NewCategoryRepo(database)
+	productRepo := repo.NewProductRepo(database)
+	movementRepo := repo.NewMovementRepo(database)
+	trxRepo := repo.NewTrxRepo(database)
+	storeRepo := repo.NewStoreRepo(database)
+	reportRepo := repo.NewReportRepo(database)
+
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
@@ -71,68 +66,77 @@ func New(ctx context.Context) (*Server, error) {
 	stockH := handler.NewStockHandler(catalogSvc)
 	trxH := handler.NewTrxHandler(trxSvc)
 	settingsH := handler.NewSettingsHandler(settingsSvc)
-	healthH := handler.NewHealthHandler(pool)
+	healthH := handler.NewHealthHandler(database)
 
-	r := chi.NewRouter()
-	r.Use(chimw.Logger)
-	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(30 * time.Second))
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		ExposedHeaders:   []string{},
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	// 30s request timeout like old chi backend (chimw.Timeout).
+	// Literal bug: slow queries could hang forever.
+	r.Use(func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     cfg.CORSOrigins,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
-		MaxAge:           300,
+		// Fixed: was 300 (300ns) — cors.Config expects time.Duration.
+		MaxAge: 300 * time.Second,
 	}))
 
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", healthH.Health)
+	v1 := r.Group("/api/v1")
+	{
+		v1.GET("/health", healthH.Health)
 
-		// publik
-		r.Post("/auth/register", authH.Register)
-		r.Post("/auth/login", authH.Login)
-		r.Post("/auth/refresh", authH.Refresh)
-		r.Post("/auth/logout", authH.Logout)
-		r.Post("/auth/otp/send", authH.SendOTP)
-		r.Post("/auth/otp/verify", authH.VerifyOTP)
+		// Public
+		v1.POST("/auth/register", authH.Register)
+		v1.POST("/auth/login", authH.Login)
+		v1.POST("/auth/refresh", authH.Refresh)
+		v1.POST("/auth/logout", authH.Logout)
+		v1.POST("/auth/otp/send", authH.SendOTP)
+		v1.POST("/auth/otp/verify", authH.VerifyOTP)
 
-		// butuh access token
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.Auth(authSvc))
-			r.Get("/auth/me", authH.Me)
-			r.Post("/auth/switch", authH.Switch)
+		// Authenticated
+		authGroup := v1.Group("")
+		authGroup.Use(middleware.Auth(authSvc))
+		{
+			authGroup.GET("/auth/me", authH.Me)
+			authGroup.POST("/auth/switch", authH.Switch)
 
-			// katalog: semua role boleh membaca (POS kasir), tulis hanya admin
-			r.Get("/categories", catalogH.ListCategories)
-			r.Get("/products", catalogH.ListProducts)
-			r.Get("/products/{id}", catalogH.GetProduct)
-			r.Post("/transactions", trxH.Checkout)
-			r.Get("/transactions", trxH.List)
-			r.Get("/transactions/{id}", trxH.Get)
-			r.Get("/settings", settingsH.Get)
-			r.Get("/dashboard", settingsH.Dashboard)
+			authGroup.GET("/categories", catalogH.ListCategories)
+			authGroup.GET("/products", catalogH.ListProducts)
+			authGroup.GET("/products/:id", catalogH.GetProduct)
+			authGroup.POST("/transactions", trxH.Checkout)
+			authGroup.GET("/transactions", trxH.List)
+			authGroup.GET("/transactions/:id", trxH.Get)
+			authGroup.GET("/settings", settingsH.Get)
+			authGroup.GET("/dashboard", settingsH.Dashboard)
 
-			// khusus admin
-			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireRole(string(model.RoleAdmin)))
-				r.Get("/users", userH.List)
-				r.Post("/users", userH.Create)
-				r.Patch("/users/{id}/active", userH.SetActive)
-				r.Post("/categories", catalogH.CreateCategory)
-				r.Delete("/categories/{id}", catalogH.DeleteCategory)
-				r.Post("/products", catalogH.CreateProduct)
-				r.Put("/products/{id}", catalogH.UpdateProduct)
-				r.Patch("/products/{id}/active", catalogH.SetProductActive)
-				r.Get("/movements", stockH.ListMovements)
-				r.Post("/stock/adjustments", stockH.AdjustStock)
-				r.Post("/transactions/{id}/refund", trxH.Refund)
-				r.Put("/settings", settingsH.Update)
-				r.Put("/users/{id}/passcode", settingsH.SetPasscode)
-				r.Get("/reports", settingsH.Report)
-			})
-		})
-	})
+			// Admin only
+			adminGroup := authGroup.Group("")
+			adminGroup.Use(middleware.RequireRole(string(model.RoleAdmin)))
+			{
+				adminGroup.GET("/users", userH.List)
+				adminGroup.POST("/users", userH.Create)
+				adminGroup.PATCH("/users/:id/active", userH.SetActive)
+				adminGroup.POST("/categories", catalogH.CreateCategory)
+				adminGroup.DELETE("/categories/:id", catalogH.DeleteCategory)
+				adminGroup.POST("/products", catalogH.CreateProduct)
+				adminGroup.PUT("/products/:id", catalogH.UpdateProduct)
+				adminGroup.PATCH("/products/:id/active", catalogH.SetProductActive)
+				adminGroup.GET("/movements", stockH.ListMovements)
+				adminGroup.POST("/stock/adjustments", stockH.AdjustStock)
+				adminGroup.POST("/transactions/:id/refund", trxH.Refund)
+				adminGroup.PUT("/settings", settingsH.Update)
+				adminGroup.PUT("/users/:id/passcode", settingsH.SetPasscode)
+				adminGroup.GET("/reports", settingsH.Report)
+			}
+		}
+	}
 
 	return &Server{Handler: r, Port: cfg.Port, Cleanup: cleanup}, nil
 }

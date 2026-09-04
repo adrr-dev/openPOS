@@ -1,5 +1,3 @@
-// Command api menjalankan OpenPOS backend sebagai HTTP server jangka panjang
-// (lokal / VPS). Untuk Vercel serverless lihat api/index.go di root.
 package main
 
 import (
@@ -11,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	_ "time/tzdata" // zona waktu ter-embed (dashboard/laporan per toko)
+	_ "time/tzdata"
 
 	router "github.com/0xMinomus/openPOS/backend/router"
 )
@@ -35,7 +33,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("OpenPOS backend berjalan di http://localhost:%s", app.Port)
+		log.Printf("OpenPOS backend (Gin + GORM) berjalan di http://localhost:%s", app.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server: %v", err)
 		}

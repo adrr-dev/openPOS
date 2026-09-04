@@ -1,6 +1,6 @@
 # openPOS — Backend API
 
-Backend REST API untuk openPOS. Dibangun menggunakan **Go (chi) + PostgreSQL** dan siap di-deploy secara serverless di Vercel atau menggunakan server jangka panjang VPS.
+Backend REST API untuk openPOS. Dibangun menggunakan **Go (Gin + GORM) + PostgreSQL (Supabase)** dengan fallback **sqlite** untuk dev lokal, dan siap di-deploy secara serverless di Vercel atau menggunakan server jangka panjang VPS.
 
 - **Base URL:** `https://openpos-api.vercel.app/api/v1`
 - **Format Payload:** `application/json` (Semua body request dan response berbentuk JSON)
@@ -847,7 +847,9 @@ Isi file konfigurasi `.env` sebelum menjalankan aplikasi:
 
 | Nama Variabel | Wajib | Nilai Default | Penjelasan |
 |---|---|---|---|
-| `PORT` | Tidak | `8080` | Port HTTP lokal untuk server Chi. |
+| `PORT` | Tidak | `8080` | Port HTTP lokal untuk server Gin. |
+| `DB_DRIVER` | Tidak | _(unset)_ | `sqlite` = file DB lokal, `postgres`/kosong = Supabase. Di Vercel biarkan kosong. |
+| `LOG_SQL` | Tidak | — | Set `true` untuk log query GORM verbose (default verbose hanya saat sqlite). |
 | `DATABASE_URL` | **Ya** | — | Connection string PostgreSQL (`postgres://user:pass@host:port/db`). |
 | `JWT_SECRET` | **Ya** | — | Kunci enkripsi rahasia penandatanganan token JWT HS256. |
 | `ACCESS_TTL_MINUTES` | Tidak | `15` | Masa kadaluwarsa Access Token (Menit). |

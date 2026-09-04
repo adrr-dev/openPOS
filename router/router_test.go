@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// Smoke test jalur produksi: New() harus menghasilkan handler yang menjawab
-// /api/v1/health dengan database up (butuh .env + koneksi Supabase).
 func TestNewHealth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

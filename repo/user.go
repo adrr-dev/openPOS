@@ -3,149 +3,114 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
 
-var (
-	ErrNotFound  = errors.New("tidak ditemukan")
-	ErrDuplicate = errors.New("data sudah ada")
-)
-
-func mapDBErr(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ErrDuplicate
-	}
-	return err
-}
-
 type UserRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewUserRepo(pool *pgxpool.Pool) *UserRepo { return &UserRepo{pool: pool} }
+func NewUserRepo(db *gorm.DB) *UserRepo { return &UserRepo{db: db} }
 
-const userCols = `u.id, u.store_id, u.email, u.name, u.password_hash, u.passcode_hash,
-	u.role, u.active, u.created_at, s.name`
-
-func scanUser(row pgx.Row) (*model.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	var u model.User
-	if err := row.Scan(&u.ID, &u.StoreID, &u.Email, &u.Name, &u.PasswordHash, &u.PasscodeHash,
-		&u.Role, &u.Active, &u.CreatedAt, &u.StoreName); err != nil {
-		return nil, err
+	var store model.Store
+
+	err := r.db.WithContext(ctx).Where("email = ?", email).First(&u).Error
+	if err != nil {
+		return nil, mapDBErr(err)
+	}
+	if err := r.db.WithContext(ctx).First(&store, "id = ?", u.StoreID).Error; err == nil {
+		u.StoreName = store.Name
 	}
 	return &u, nil
 }
 
-func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
-	u, err := scanUser(r.pool.QueryRow(ctx, `
-		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id WHERE u.email = $1
-	`, email))
-	if err != nil {
-		return nil, mapDBErr(err)
-	}
-	return u, nil
-}
-
 func (r *UserRepo) GetByID(ctx context.Context, id string) (*model.User, error) {
-	u, err := scanUser(r.pool.QueryRow(ctx, `
-		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id WHERE u.id = $1
-	`, id))
+	var u model.User
+	var store model.Store
+
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&u).Error
 	if err != nil {
 		return nil, mapDBErr(err)
 	}
-	return u, nil
+	if err := r.db.WithContext(ctx).First(&store, "id = ?", u.StoreID).Error; err == nil {
+		u.StoreName = store.Name
+	}
+	return &u, nil
 }
 
 func (r *UserRepo) ListByStore(ctx context.Context, storeID string) ([]*model.User, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT `+userCols+` FROM users u JOIN stores s ON s.id = u.store_id
-		WHERE u.store_id = $1 ORDER BY u.created_at ASC
-	`, storeID)
+	users := make([]*model.User, 0)
+	var store model.Store
+	if err := r.db.WithContext(ctx).First(&store, "id = ?", storeID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	storeName := store.Name
+
+	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").Find(&users).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []*model.User
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, u)
+	for _, u := range users {
+		u.StoreName = storeName
 	}
-	return out, rows.Err()
+	return users, nil
 }
 
 func (r *UserRepo) SetActive(ctx context.Context, id string, active bool) error {
-	ct, err := r.pool.Exec(ctx, `UPDATE users SET active = $2 WHERE id = $1`, id, active)
-	if err != nil {
-		return err
+	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("active", active)
+	if res.Error != nil {
+		return res.Error
 	}
-	if ct.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (r *UserRepo) SetPasscode(ctx context.Context, id string, hash *string) error {
-	ct, err := r.pool.Exec(ctx, `UPDATE users SET passcode_hash = $2 WHERE id = $1`, id, hash)
-	if err != nil {
-		return err
+	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("passcode_hash", hash)
+	if res.Error != nil {
+		return res.Error
 	}
-	if ct.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (r *UserRepo) RegisterTx(ctx context.Context, storeName, email, name, passwordHash string) (*model.User, error) {
-	tx, err := r.pool.Begin(ctx)
+	var user *model.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		store := model.Store{Name: storeName}
+		if err := tx.Create(&store).Error; err != nil {
+			return mapDBErr(err)
+		}
+
+		now := time.Now()
+		u := model.User{
+			StoreID:         store.ID,
+			Email:           email,
+			Name:            name,
+			PasswordHash:    passwordHash,
+			Role:            model.RoleAdmin,
+			Active:          true,
+			EmailVerifiedAt: &now,
+		}
+		if err := tx.Create(&u).Error; err != nil {
+			return mapDBErr(err)
+		}
+		u.StoreName = store.Name
+		user = &u
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	var storeID uuid.UUID
-	if err := tx.QueryRow(ctx,
-		`INSERT INTO stores (name) VALUES ($1) RETURNING id`, storeName,
-	).Scan(&storeID); err != nil {
-		return nil, mapDBErr(err)
-	}
-
-	u := &model.User{
-		ID:           uuid.NewString(),
-		StoreID:      storeID.String(),
-		Email:        email,
-		Name:         name,
-		PasswordHash: passwordHash,
-		Role:         model.RoleAdmin,
-		Active:       true,
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO users (id, store_id, email, name, password_hash, role, active, email_verified_at)
-		VALUES ($1, $2, $3, $4, $5, 'admin', TRUE, now())
-	`, u.ID, u.StoreID, u.Email, u.Name, u.PasswordHash); err != nil {
-		return nil, mapDBErr(err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-
-	full, err := r.GetByID(ctx, u.ID)
-	if err != nil {
-		return nil, err
-	}
-	return full, nil
+	return user, nil
 }

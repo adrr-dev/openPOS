@@ -1,9 +1,10 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/0xMinomus/openPOS/backend/middleware"
 	"github.com/0xMinomus/openPOS/backend/model"
@@ -57,189 +58,163 @@ type authResponse struct {
 	model.TokenPair
 }
 
-// SendOTP mengirim kode OTP 6 digit ke email.
-// POST /api/v1/auth/otp/send
-func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) SendOTP(c *gin.Context) {
 	var req otpSendReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	err := h.auth.SendOTP(r.Context(), req.Email)
+	err := h.auth.SendOTP(c.Request.Context(), req.Email)
 	if err != nil {
-		respondOTPErr(w, err)
+		respondOTPErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Kode OTP terkirim ke email Anda."})
+	c.JSON(http.StatusOK, gin.H{"message": "Kode OTP terkirim ke email Anda."})
 }
 
-// VerifyOTP memverifikasi kode OTP.
-// POST /api/v1/auth/otp/verify
-func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	var req otpVerifyReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	err := h.auth.VerifyOTP(r.Context(), req.Email, req.Code)
+	err := h.auth.VerifyOTP(c.Request.Context(), req.Email, req.Code)
 	if err != nil {
-		respondOTPErr(w, err)
+		respondOTPErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"verified": true, "message": "Email berhasil diverifikasi."})
+	c.JSON(http.StatusOK, gin.H{"verified": true, "message": "Email berhasil diverifikasi."})
 }
 
-// Register membuat Store + akun Admin sekaligus, lalu langsung login.
-// POST /api/v1/auth/register
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	user, pair, err := h.auth.Register(r.Context(), req.Name, req.Email, req.Password, req.StoreName)
+	user, pair, err := h.auth.Register(c.Request.Context(), req.Name, req.Email, req.Password, req.StoreName)
 	if err != nil {
-		respondAuthErr(w, err)
+		respondAuthErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, authResponse{User: user.Public(), TokenPair: *pair})
+	c.JSON(http.StatusCreated, authResponse{User: user.Public(), TokenPair: *pair})
 }
 
-// Login memverifikasi email + password (+ passcode bila akun dilindungi).
-// POST /api/v1/auth/login
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Login(c *gin.Context) {
 	var req loginReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	user, pair, err := h.auth.Login(r.Context(), req.Email, req.Password, req.Passcode)
+	user, pair, err := h.auth.Login(c.Request.Context(), req.Email, req.Password, req.Passcode)
 	if err != nil {
-		respondAuthErr(w, err)
+		respondAuthErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+	c.JSON(http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
 }
 
-// Refresh menukar refresh token dengan pasangan token baru (rotasi).
-// POST /api/v1/auth/refresh
-func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req refreshReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-		writeError(w, http.StatusBadRequest, "refresh_token wajib diisi")
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token wajib diisi"})
 		return
 	}
-	user, pair, err := h.auth.Refresh(r.Context(), req.RefreshToken)
+	user, pair, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+	c.JSON(http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
 }
 
-// Logout mencabut refresh token agar tidak bisa dipakai lagi.
-// POST /api/v1/auth/logout
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Logout(c *gin.Context) {
 	var req logoutReq
-	_ = json.NewDecoder(r.Body).Decode(&req) // body opsional
-	h.auth.Logout(r.Context(), req.RefreshToken)
-	writeJSON(w, http.StatusOK, map[string]string{"message": "keluar berhasil"})
+	_ = c.ShouldBindJSON(&req)
+	h.auth.Logout(c.Request.Context(), req.RefreshToken)
+	c.JSON(http.StatusOK, gin.H{"message": "keluar berhasil"})
 }
 
-// Me mengembalikan profil user sesi aktif.
-// GET /api/v1/auth/me  (Bearer access token)
-func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
-	pubUser, err := h.auth.Me(r.Context(), c)
+func (h *AuthHandler) Me(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	pubUser, err := h.auth.Me(c.Request.Context(), claims)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "sesi tidak valid, silakan masuk kembali"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": pubUser})
+	c.JSON(http.StatusOK, gin.H{"user": pubUser})
 }
 
-// Switch beralih sesi ke akun lain dalam toko yang sama.
-// POST /api/v1/auth/switch  (Bearer access token)
-func (h *AuthHandler) Switch(w http.ResponseWriter, r *http.Request) {
-	c := middleware.ClaimsFrom(r.Context())
+func (h *AuthHandler) Switch(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
 	var req switchReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "body JSON tidak valid")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
 	if req.TargetUserID == "" {
-		writeError(w, http.StatusBadRequest, "target_user_id wajib diisi")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id wajib diisi"})
 		return
 	}
-	pubUser, pair, err := h.auth.Switch(r.Context(), c, req.TargetUserID, req.Passcode)
+	pubUser, pair, err := h.auth.Switch(c.Request.Context(), claims, req.TargetUserID, req.Passcode)
 	if err != nil {
-		respondSwitchErr(w, err)
+		respondSwitchErr(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, authResponse{User: *pubUser, TokenPair: *pair})
+	c.JSON(http.StatusOK, authResponse{User: *pubUser, TokenPair: *pair})
 }
 
-func respondSwitchErr(w http.ResponseWriter, err error) {
+func respondSwitchErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrSwitchSelf):
-		writeError(w, http.StatusBadRequest, "Tidak dapat beralih ke akun sendiri.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Tidak dapat beralih ke akun sendiri."})
 	case errors.Is(err, service.ErrPasscodeRequired):
-		writeError(w, http.StatusUnauthorized, "passcode_required")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required"})
 	case errors.Is(err, service.ErrPasscodeWrong):
-		writeError(w, http.StatusUnauthorized, "Passcode salah. Coba lagi.")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi."})
 	case errors.Is(err, service.ErrAccountInactive):
-		writeError(w, http.StatusForbidden, "Akun dinonaktifkan.")
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akun dinonaktifkan."})
 	case errors.Is(err, repo.ErrNotFound):
-		writeError(w, http.StatusNotFound, "Akun tidak ditemukan.")
+		c.JSON(http.StatusNotFound, gin.H{"error": "Akun tidak ditemukan."})
 	default:
-		writeError(w, http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 }
 
-func respondOTPErr(w http.ResponseWriter, err error) {
+func respondOTPErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidEmail):
-		writeError(w, http.StatusBadRequest, "Email tidak valid.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email tidak valid."})
 	case errors.Is(err, service.ErrOtpCooldown):
-		writeError(w, http.StatusTooManyRequests, "Terlalu sering meminta kode. Coba lagi dalam 60 detik.")
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Terlalu sering meminta kode. Coba lagi dalam 60 detik."})
 	case errors.Is(err, service.ErrOtpWrong):
-		writeError(w, http.StatusBadRequest, "Kode OTP salah.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Kode OTP salah."})
 	case errors.Is(err, service.ErrOtpExpired):
-		writeError(w, http.StatusGone, "Kode OTP sudah kedaluwarsa. Kirim ulang.")
+		c.JSON(http.StatusGone, gin.H{"error": "Kode OTP sudah kedaluwarsa. Kirim ulang."})
 	case errors.Is(err, service.ErrOtpMaxAttempts):
-		writeError(w, http.StatusTooManyRequests, "Terlalu banyak percobaan. Kirim ulang kode OTP.")
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."})
 	case errors.Is(err, service.ErrEmailTaken):
-		writeError(w, http.StatusConflict, "Email sudah terdaftar. Silakan masuk.")
+		c.JSON(http.StatusConflict, gin.H{"error": "Email sudah terdaftar. Silakan masuk."})
 	default:
-		writeError(w, http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 }
 
-func respondAuthErr(w http.ResponseWriter, err error) {
+func respondAuthErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPasscodeRequired):
-		writeError(w, http.StatusUnauthorized, "passcode_required")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required"})
 	case errors.Is(err, service.ErrPasscodeWrong):
-		writeError(w, http.StatusUnauthorized, "Passcode salah. Coba lagi.")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi."})
 	case errors.Is(err, service.ErrInvalidCredentials):
-		writeError(w, http.StatusUnauthorized, "Email atau kata sandi tidak cocok. Coba lagi.")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau kata sandi tidak cocok. Coba lagi."})
 	case errors.Is(err, service.ErrEmailTaken):
-		writeError(w, http.StatusConflict, "Email sudah terdaftar. Silakan masuk.")
+		c.JSON(http.StatusConflict, gin.H{"error": "Email sudah terdaftar. Silakan masuk."})
 	case errors.Is(err, service.ErrEmailNotVerified):
-		writeError(w, http.StatusBadRequest, "Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu."})
 	case errors.Is(err, service.ErrAccountInactive):
-		writeError(w, http.StatusForbidden, "Akun dinonaktifkan. Hubungi admin toko.")
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akun dinonaktifkan. Hubungi admin toko."})
 	default:
-		writeError(w, http.StatusBadRequest, err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
-}
-
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
 }

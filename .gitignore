@@ -3,3 +3,6 @@
 bin/
 tmp/
 supabase/
+hashpw
+cleardb
+openpos_test.db

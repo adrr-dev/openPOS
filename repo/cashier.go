@@ -3,102 +3,79 @@ package repo
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
 
 type CashierRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewCashierRepo(pool *pgxpool.Pool) *CashierRepo { return &CashierRepo{pool: pool} }
+func NewCashierRepo(db *gorm.DB) *CashierRepo { return &CashierRepo{db: db} }
 
-const cashierCols = `c.id, c.store_id, c.name, c.passcode_hash, c.active, c.created_at`
-
-func scanCashier(row pgx.Row) (*model.Cashier, error) {
+func (r *CashierRepo) GetByID(ctx context.Context, id string) (*model.Cashier, error) {
 	var c model.Cashier
-	if err := row.Scan(&c.ID, &c.StoreID, &c.Name, &c.PasscodeHash, &c.Active, &c.CreatedAt); err != nil {
-		return nil, err
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&c).Error
+	if err != nil {
+		return nil, mapDBErr(err)
 	}
 	return &c, nil
 }
 
-func (r *CashierRepo) GetByID(ctx context.Context, id string) (*model.Cashier, error) {
-	c, err := scanCashier(r.pool.QueryRow(ctx,
-		`SELECT `+cashierCols+` FROM cashiers c WHERE c.id = $1`, id))
-	if err != nil {
-		return nil, mapDBErr(err)
-	}
-	return c, nil
-}
-
 func (r *CashierRepo) ListByStore(ctx context.Context, storeID string) ([]*model.Cashier, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+cashierCols+` FROM cashiers c WHERE c.store_id = $1 ORDER BY c.created_at ASC`, storeID)
+	out := make([]*model.Cashier, 0)
+	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").Find(&out).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	out := make([]*model.Cashier, 0)
-	for rows.Next() {
-		c, err := scanCashier(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *CashierRepo) Create(ctx context.Context, storeID, name string) (*model.Cashier, error) {
-	var id string
-	err := r.pool.QueryRow(ctx,
-		`INSERT INTO cashiers (store_id, name) VALUES ($1, $2) RETURNING id`,
-		storeID, name).Scan(&id)
+	c := model.Cashier{
+		StoreID: storeID,
+		Name:    name,
+		Active:  true,
+	}
+	err := r.db.WithContext(ctx).Create(&c).Error
 	if err != nil {
 		return nil, mapDBErr(err)
 	}
-	return r.GetByID(ctx, id)
+	return &c, nil
 }
 
 func (r *CashierRepo) SetActive(ctx context.Context, id string, active bool) error {
-	ct, err := r.pool.Exec(ctx,
-		`UPDATE cashiers SET active = $2 WHERE id = $1`, id, active)
-	if err != nil {
-		return err
+	res := r.db.WithContext(ctx).Model(&model.Cashier{}).Where("id = ?", id).Update("active", active)
+	if res.Error != nil {
+		return res.Error
 	}
-	if ct.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (r *CashierRepo) SetPasscode(ctx context.Context, id string, hash *string) error {
-	ct, err := r.pool.Exec(ctx,
-		`UPDATE cashiers SET passcode_hash = $2 WHERE id = $1`, id, hash)
-	if err != nil {
-		return err
+	res := r.db.WithContext(ctx).Model(&model.Cashier{}).Where("id = ?", id).Update("passcode_hash", hash)
+	if res.Error != nil {
+		return res.Error
 	}
-	if ct.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
 func (r *CashierRepo) GetOrCreateDefault(ctx context.Context, storeID, defaultName string) (string, error) {
-	var id string
-	err := r.pool.QueryRow(ctx, `
-		SELECT id FROM cashiers WHERE store_id = $1 ORDER BY created_at ASC LIMIT 1
-	`, storeID).Scan(&id)
+	var c model.Cashier
+	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").First(&c).Error
 	if err == nil {
-		return id, nil
+		return c.ID, nil
 	}
-	c, err := r.Create(ctx, storeID, defaultName)
+	created, err := r.Create(ctx, storeID, defaultName)
 	if err != nil {
 		return "", err
 	}
-	return c.ID, nil
+	return created.ID, nil
 }

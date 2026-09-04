@@ -61,8 +61,6 @@ func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *r
 	}
 }
 
-// ── register ─────────────────────────────────────────────────────────
-
 func (s *AuthService) SendOTP(ctx context.Context, email string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if !isEmail(email) {
@@ -229,8 +227,6 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 	return user, pair, nil
 }
 
-// ── login ────────────────────────────────────────────────────────────
-
 func (s *AuthService) Login(ctx context.Context, email, password, passcode string) (*model.User, *model.TokenPair, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
@@ -262,8 +258,6 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode strin
 	}
 	return user, pair, nil
 }
-
-// ── me / refresh / logout ────────────────────────────────────────────
 
 func (s *AuthService) Me(ctx context.Context, claims *Claims) (*model.PublicUser, error) {
 	if claims.ActingAsCashierID != nil {
@@ -323,9 +317,6 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
 	_ = s.refresh.Revoke(ctx, hashToken(refreshToken))
 }
 
-// ── switch account ──────────────────────────────────────────────────
-
-// Switch memungkinkan beralih sesi ke Admin atau Kasir lain dalam toko yang sama.
 func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, passcode string) (*model.PublicUser, *model.TokenPair, error) {
 	currentActiveID := claims.UserID
 	if claims.ActingAsCashierID != nil {
@@ -340,7 +331,6 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, pass
 		return nil, nil, ErrTokenInvalid
 	}
 
-	// Cek apakah target adalah owner (admin) sendiri
 	if targetID == owner.ID {
 		if owner.PasscodeHash != nil && *owner.PasscodeHash != "" {
 			if passcode == "" {
@@ -358,7 +348,6 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, pass
 		return &pub, pair, nil
 	}
 
-	// Cek apakah target adalah cashier
 	cashier, err := s.cashiers.GetByID(ctx, targetID)
 	if err != nil {
 		return nil, nil, repo.ErrNotFound
@@ -386,8 +375,6 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID, pass
 	pub := cashier.Public(owner.StoreName)
 	return &pub, pair, nil
 }
-
-// ── internal ─────────────────────────────────────────────────────────
 
 type Claims struct {
 	UserID            string

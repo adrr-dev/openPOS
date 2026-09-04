@@ -3,58 +3,73 @@ package repo
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 )
 
 type StoreRepo struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewStoreRepo(pool *pgxpool.Pool) *StoreRepo { return &StoreRepo{pool: pool} }
-
-const setCols = `name, address, phone, tax_enabled, tax_pct,
-	receipt_header, receipt_footer, paper, timezone`
-
-func scanSettings(row interface{ Scan(...any) error }) (*model.StoreSettings, error) {
-	var s model.StoreSettings
-	if err := row.Scan(&s.Name, &s.Address, &s.Phone, &s.TaxEnabled, &s.TaxPct,
-		&s.ReceiptHeader, &s.ReceiptFooter, &s.Paper, &s.Timezone); err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
+func NewStoreRepo(db *gorm.DB) *StoreRepo { return &StoreRepo{db: db} }
 
 func (r *StoreRepo) GetSettings(ctx context.Context, storeID string) (*model.StoreSettings, error) {
-	return scanSettings(r.pool.QueryRow(ctx, `SELECT `+setCols+` FROM stores WHERE id = $1`, storeID))
+	var st model.Store
+	if err := r.db.WithContext(ctx).Where("id = ?", storeID).First(&st).Error; err != nil {
+		return nil, mapDBErr(err)
+	}
+	return &model.StoreSettings{
+		Name:          st.Name,
+		Address:       st.Address,
+		Phone:         st.Phone,
+		TaxEnabled:    st.TaxEnabled,
+		TaxPct:        st.TaxPct,
+		ReceiptHeader: st.ReceiptHeader,
+		ReceiptFooter: st.ReceiptFooter,
+		Paper:         st.Paper,
+		Timezone:      st.Timezone,
+	}, nil
 }
 
-// GetTimezone mengembalikan zona waktu toko (fallback Asia/Makassar bila kosong).
 func (r *StoreRepo) GetTimezone(ctx context.Context, storeID string) (string, error) {
-	var tz string
-	err := r.pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(timezone,''),'Asia/Makassar') FROM stores WHERE id = $1`, storeID).Scan(&tz)
-	return tz, err
+	var st model.Store
+	if err := r.db.WithContext(ctx).Where("id = ?", storeID).First(&st).Error; err != nil {
+		return "Asia/Makassar", mapDBErr(err)
+	}
+	if st.Timezone == "" {
+		return "Asia/Makassar", nil
+	}
+	return st.Timezone, nil
 }
 
 func (r *StoreRepo) UpdateSettings(ctx context.Context, storeID string, s *model.StoreSettings) (*model.StoreSettings, error) {
-	return scanSettings(r.pool.QueryRow(ctx, `
-		UPDATE stores SET name=$2, address=$3, phone=$4, tax_enabled=$5, tax_pct=$6,
-			receipt_header=$7, receipt_footer=$8, paper=$9, timezone=$10
-		WHERE id = $1 RETURNING `+setCols+`
-	`, storeID, s.Name, s.Address, s.Phone, s.TaxEnabled, s.TaxPct,
-		s.ReceiptHeader, s.ReceiptFooter, s.Paper, s.Timezone))
+	res := r.db.WithContext(ctx).Model(&model.Store{}).Where("id = ?", storeID).Updates(map[string]interface{}{
+		"name":           s.Name,
+		"address":        s.Address,
+		"phone":          s.Phone,
+		"tax_enabled":    s.TaxEnabled,
+		"tax_pct":        s.TaxPct,
+		"receipt_header": s.ReceiptHeader,
+		"receipt_footer": s.ReceiptFooter,
+		"paper":          s.Paper,
+		"timezone":       s.Timezone,
+	})
+	if res.Error != nil {
+		return nil, mapDBErr(res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrNotFound
+	}
+	return r.GetSettings(ctx, storeID)
 }
 
-// SetPasscode mengatur/menghapus passcode akun (hash disimpan di sini).
 func (r *StoreRepo) SetPasscode(ctx context.Context, storeID, userID string, hash *string) error {
-	tag, err := r.pool.Exec(ctx,
-		`UPDATE users SET passcode_hash = $3 WHERE id = $1 AND store_id = $2`,
-		userID, storeID, hash)
-	if err != nil {
-		return err
+	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ? AND store_id = ?", userID, storeID).Update("passcode_hash", hash)
+	if res.Error != nil {
+		return res.Error
 	}
-	if tag.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil

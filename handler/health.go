@@ -3,26 +3,27 @@ package handler
 import (
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type HealthHandler struct {
-	pool *pgxpool.Pool
+	db *gorm.DB
 }
 
-func NewHealthHandler(pool *pgxpool.Pool) *HealthHandler { return &HealthHandler{pool: pool} }
+func NewHealthHandler(db *gorm.DB) *HealthHandler { return &HealthHandler{db: db} }
 
-// GET /api/v1/health — status layanan & koneksi database.
-func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
+func (h *HealthHandler) Health(c *gin.Context) {
 	status := "ok"
-	db := "up"
-	if err := h.pool.Ping(r.Context()); err != nil {
+	dbStatus := "up"
+	sqlDB, err := h.db.DB()
+	if err != nil || sqlDB.PingContext(c.Request.Context()) != nil {
 		status = "degraded"
-		db = "down"
+		dbStatus = "down"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	c.JSON(http.StatusOK, gin.H{
 		"status":   status,
-		"database": db,
+		"database": dbStatus,
 		"service":  "openpos-backend",
 	})
 }

@@ -3,94 +3,85 @@ package db
 import (
 	"context"
 	"fmt"
-	"io/fs"
-	"sort"
+	"os"
+	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
-	migrations "github.com/0xMinomus/openPOS/backend/migrations"
+	"github.com/0xMinomus/openPOS/backend/model"
 )
 
-func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("gagal parsing DATABASE_URL: %w", err)
-	}
-	// Pooler transaksi (mis. Supabase port 6543/PgBouncer) tidak mendukung
-	// prepared statement — paksa protokol sederhana agar selalu kompatibel,
-	// apa pun isi parameter pada DSN.
-	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+// DB_DRIVER selects the database explicitly:
+//   DB_DRIVER=sqlite   -> local file DB (dev/test, no Supabase needed)
+//   DB_DRIVER=postgres  -> force Supabase/Postgres even if URL looks like a file
+//   DB_DRIVER unset     -> auto-detect: file:/.db/sqlite in DATABASE_URL means
+//                          sqlite, otherwise postgres. On Vercel just leave it
+//                          unset and set DATABASE_URL to the pooler string.
+func Connect(ctx context.Context, databaseURL string) (*gorm.DB, error) {
+	var dialector gorm.Dialector
 
-	pool, err := pgxpool.NewWithConfig(context.WithoutCancel(ctx), cfg)
+	driver := strings.ToLower(strings.TrimSpace(os.Getenv("DB_DRIVER")))
+	lowerURL := strings.ToLower(databaseURL)
+	isSQLite := driver == "sqlite" ||
+		(driver == "" && (strings.HasPrefix(lowerURL, "file:") ||
+			strings.Contains(lowerURL, ".db") ||
+			strings.Contains(lowerURL, "sqlite")))
+
+	if isSQLite {
+		if databaseURL == "" || databaseURL == "postgres://..." {
+			databaseURL = "openpos_test.db"
+		}
+		dialector = sqlite.Open(databaseURL)
+	} else {
+		// Force simple protocol so Supabase PgBouncer (port 6543,
+		// transaction mode) works, which doesn't support prepared statements.
+		dialector = postgres.New(postgres.Config{
+			DSN:                  databaseURL,
+			PreferSimpleProtocol: true,
+		})
+	}
+
+	// Quiet SQL logs on hosted Postgres (Vercel log spam), verbose locally.
+	// Set LOG_SQL=true to force query logging anywhere.
+	logLevel := logger.Warn
+	if isSQLite || strings.EqualFold(os.Getenv("LOG_SQL"), "true") {
+		logLevel = logger.Info
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logLevel),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("gagal membuat pool: %w", err)
+		return nil, fmt.Errorf("gagal terhubung ke database via GORM: %w", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("gagal terhubung ke database: %w", err)
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("gagal mendapatkan sql.DB: %w", err)
 	}
-	return pool, nil
+
+	if err := sqlDB.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("gagal ping database: %w", err)
+	}
+
+	return db, nil
 }
 
-// Migrate menjalankan file .sql di folder migrations yang belum diterapkan,
-// diurutkan berdasarkan nama file. Setiap migrasi berjalan dalam satu transaksi.
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			version    TEXT PRIMARY KEY,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		)
-	`); err != nil {
-		return fmt.Errorf("gagal membuat schema_migrations: %w", err)
-	}
-
-	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		return fmt.Errorf("gagal membaca folder migrations: %w", err)
-	}
-
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && len(e.Name()) > 4 && e.Name()[len(e.Name())-4:] == ".sql" {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
-
-	for _, name := range files {
-		var exists bool
-		if err := pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)`, name,
-		).Scan(&exists); err != nil {
-			return fmt.Errorf("gagal cek status migrasi %s: %w", name, err)
-		}
-		if exists {
-			continue
-		}
-
-		content, err := migrations.FS.ReadFile(name)
-		if err != nil {
-			return fmt.Errorf("gagal baca migrasi %s: %w", name, err)
-		}
-
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("gagal mulai tx migrasi %s: %w", name, err)
-		}
-		if _, err := tx.Exec(ctx, string(content)); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("gagal eksekusi migrasi %s: %w", name, err)
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO schema_migrations (version) VALUES ($1)`, name,
-		); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("gagal catat migrasi %s: %w", name, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("gagal commit migrasi %s: %w", name, err)
-		}
-	}
-	return nil
+func Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&model.Store{},
+		&model.User{},
+		&model.Cashier{},
+		&model.RefreshToken{},
+		&model.EmailOtp{},
+		&model.Category{},
+		&model.Product{},
+		&model.Movement{},
+		&model.Trx{},
+		&model.TransactionItem{},
+		&model.Refund{},
+	)
 }
