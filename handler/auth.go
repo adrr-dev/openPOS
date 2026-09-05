@@ -53,6 +53,11 @@ type switchReq struct {
 	Passcode     string `json:"passcode,omitempty"`
 }
 
+type googleReq struct {
+	IDToken   string `json:"id_token"`
+	StoreName string `json:"storeName"`
+}
+
 type authResponse struct {
 	User model.PublicUser `json:"user"`
 	model.TokenPair
@@ -109,6 +114,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	user, pair, err := h.auth.Login(c.Request.Context(), req.Email, req.Password, req.Passcode)
 	if err != nil {
 		respondAuthErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+}
+
+func (h *AuthHandler) Google(c *gin.Context) {
+	var req googleReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.IDToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id_token wajib diisi"})
+		return
+	}
+	user, pair, err := h.auth.GoogleLogin(c.Request.Context(), req.IDToken, req.StoreName)
+	if err != nil {
+		respondGoogleErr(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
@@ -195,6 +214,23 @@ func respondOTPErr(c *gin.Context, err error) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."})
 	case errors.Is(err, service.ErrEmailTaken):
 		c.JSON(http.StatusConflict, gin.H{"error": "Email sudah terdaftar. Silakan masuk."})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
+}
+
+func respondGoogleErr(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrGoogleInvalid):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "login Google tidak valid"})
+	case errors.Is(err, service.ErrGoogleNotConfigured):
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "login Google belum dikonfigurasi di server"})
+	case errors.Is(err, service.ErrEmailNotVerified):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email Google belum diverifikasi."})
+	case errors.Is(err, service.ErrEmailTaken):
+		c.JSON(http.StatusConflict, gin.H{"error": "Email sudah terdaftar. Silakan masuk."})
+	case errors.Is(err, service.ErrAccountInactive):
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akun dinonaktifkan. Hubungi admin toko."})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}

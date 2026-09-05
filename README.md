@@ -143,6 +143,25 @@ Mendaftarkan Toko (Store) baru sekaligus membuat akun Admin pertama untuk toko t
   * `400 Bad Request` — `{"error": "Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu."}`
   * `409 Conflict` — `{"error": "Email sudah terdaftar. Silakan masuk."}`
 
+#### `POST /auth/google`
+Login/daftar instan dengan Google (GIS ID-token flow, alternatif dari OTP — keduanya hidup berdampingan).
+* **Autentikasi:** Publik (Tanpa token)
+* **Request Expected:**
+  ```json
+  {
+    "id_token": "eyJ...",
+    "storeName": "Toko Sembako Sari"
+  }
+  ```
+  *(Catatan: `id_token` didapat frontend dari tombol Google Identity Services. `storeName` opsional — hanya dipakai saat email belum terdaftar, untuk menamai toko baru; kosong memakai `"<nama>"'s Store`. Email yang sudah terdaftar (OTP maupun Google) otomatis terhubung ke akun yang sama; password lama tetap berfungsi.)*
+* **Response Sukses (`200 OK`):** format response sama dengan `/auth/register`.
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "id_token wajib diisi"}`
+  * `401 Unauthorized` — `{"error": "login Google tidak valid"}` (tanda tangan kedaluwarsa/salah, audience bukan milik aplikasi ini).
+  * `400 Bad Request` — Email Google belum diverifikasi.
+  * `403 Forbidden` — Akun dinonaktifkan.
+  * `500 Internal Server Error` — `GOOGLE_CLIENT_ID` belum diset di server.
+
 #### `POST /auth/login`
 Autentikasi masuk pengguna menggunakan email dan password.
 * **Autentikasi:** Publik (Tanpa token)

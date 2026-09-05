@@ -80,4 +80,3 @@ func (s *UserService) SetActive(ctx context.Context, storeID, targetID uint, act
 	}
 	return s.cashiers.SetActive(ctx, targetID, active)
 }
-

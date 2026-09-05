@@ -54,7 +54,7 @@ func New(ctx context.Context) (*Server, error) {
 	storeRepo := repo.NewStoreRepo(database)
 	reportRepo := repo.NewReportRepo(database)
 
-	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour)
+	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour, cfg.GoogleClientID)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
 	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
@@ -95,6 +95,7 @@ func New(ctx context.Context) (*Server, error) {
 		// Public
 		v1.POST("/auth/register", authH.Register)
 		v1.POST("/auth/login", authH.Login)
+		v1.POST("/auth/google", authH.Google)
 		v1.POST("/auth/refresh", authH.Refresh)
 		v1.POST("/auth/logout", authH.Logout)
 		v1.POST("/auth/otp/send", authH.SendOTP)

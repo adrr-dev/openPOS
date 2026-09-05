@@ -17,41 +17,49 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 
 	"github.com/0xMinomus/openPOS/backend/model"
 	"github.com/0xMinomus/openPOS/backend/repo"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("email atau kata sandi tidak cocok")
-	ErrPasscodeRequired   = errors.New("passcode_required")
-	ErrPasscodeWrong      = errors.New("passcode salah")
-	ErrEmailTaken         = errors.New("email sudah terdaftar")
-	ErrAccountInactive    = errors.New("akun dinonaktifkan")
-	ErrTokenInvalid       = errors.New("sesi tidak valid, silakan masuk kembali")
-	ErrSwitchSelf         = errors.New("tidak dapat beralih ke akun sendiri")
-	ErrInvalidEmail       = errors.New("Email tidak valid.")
-	ErrOtpCooldown        = errors.New("Terlalu sering meminta kode. Coba lagi dalam 60 detik.")
-	ErrOtpWrong           = errors.New("Kode OTP salah.")
-	ErrOtpExpired         = errors.New("Kode OTP sudah kedaluwarsa. Kirim ulang.")
-	ErrOtpMaxAttempts     = errors.New("Terlalu banyak percobaan. Kirim ulang kode OTP.")
-	ErrEmailNotVerified   = errors.New("Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
+	ErrInvalidCredentials  = errors.New("email atau kata sandi tidak cocok")
+	ErrPasscodeRequired    = errors.New("passcode_required")
+	ErrPasscodeWrong       = errors.New("passcode salah")
+	ErrEmailTaken          = errors.New("email sudah terdaftar")
+	ErrAccountInactive     = errors.New("akun dinonaktifkan")
+	ErrTokenInvalid        = errors.New("sesi tidak valid, silakan masuk kembali")
+	ErrSwitchSelf          = errors.New("tidak dapat beralih ke akun sendiri")
+	ErrInvalidEmail        = errors.New("Email tidak valid.")
+	ErrOtpCooldown         = errors.New("Terlalu sering meminta kode. Coba lagi dalam 60 detik.")
+	ErrOtpWrong            = errors.New("Kode OTP salah.")
+	ErrOtpExpired          = errors.New("Kode OTP sudah kedaluwarsa. Kirim ulang.")
+	ErrOtpMaxAttempts      = errors.New("Terlalu banyak percobaan. Kirim ulang kode OTP.")
+	ErrEmailNotVerified    = errors.New("Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
+	ErrGoogleInvalid       = errors.New("login Google tidak valid")
+	ErrGoogleNotConfigured = errors.New("login Google belum dikonfigurasi di server")
 )
 
 var TestOnOTPSent func(email, code string)
 
+// VerifyGoogleToken validates a GIS ID token. Package-level var (same
+// pattern as TestOnOTPSent) so tests can stub it — no network needed.
+var VerifyGoogleToken = idtoken.Validate
+
 type AuthService struct {
-	users      *repo.UserRepo
-	cashiers   *repo.CashierRepo
-	refresh    *repo.RefreshRepo
-	otps       *repo.OtpRepo
-	jwtSecret  []byte
-	accessTTL  time.Duration
-	refreshTTL time.Duration
+	users          *repo.UserRepo
+	cashiers       *repo.CashierRepo
+	refresh        *repo.RefreshRepo
+	otps           *repo.OtpRepo
+	jwtSecret      []byte
+	accessTTL      time.Duration
+	refreshTTL     time.Duration
+	googleClientID string
 }
 
-func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, otps *repo.OtpRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
-	return &AuthService{
+func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, otps *repo.OtpRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration, googleClientID ...string) *AuthService {
+	svc := &AuthService{
 		users:      users,
 		cashiers:   cashiers,
 		refresh:    refresh,
@@ -60,6 +68,10 @@ func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *r
 		accessTTL:  accessTTL,
 		refreshTTL: refreshTTL,
 	}
+	if len(googleClientID) > 0 {
+		svc.googleClientID = googleClientID[0]
+	}
+	return svc
 }
 
 func (s *AuthService) SendOTP(ctx context.Context, email string) error {
@@ -258,6 +270,89 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode strin
 		return nil, nil, err
 	}
 	return user, pair, nil
+}
+
+// GoogleLogin verifies a GIS ID token and returns our own token pair.
+// Existing emails auto-link (password keeps working); new emails get a
+// fresh store + admin, mirroring Register without the OTP gate or password.
+func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName string) (*model.User, *model.TokenPair, error) {
+	if s.googleClientID == "" {
+		return nil, nil, ErrGoogleNotConfigured
+	}
+	if strings.TrimSpace(idToken) == "" {
+		return nil, nil, ErrGoogleInvalid
+	}
+
+	payload, err := VerifyGoogleToken(ctx, idToken, s.googleClientID)
+	if err != nil {
+		return nil, nil, ErrGoogleInvalid
+	}
+
+	email, _ := payload.Claims["email"].(string)
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !isEmail(email) {
+		return nil, nil, ErrGoogleInvalid
+	}
+	if !googleEmailVerified(payload.Claims["email_verified"]) {
+		return nil, nil, ErrEmailNotVerified
+	}
+	name := strings.TrimSpace(stringClaim(payload.Claims, "name"))
+	if name == "" {
+		name = strings.Split(email, "@")[0]
+	}
+
+	user, err := s.users.GetByEmail(ctx, email)
+	if err == nil {
+		if !user.Active {
+			return nil, nil, ErrAccountInactive
+		}
+		pair, err := s.issueTokens(ctx, user.ID, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		return user, pair, nil
+	} else if !errors.Is(err, repo.ErrNotFound) {
+		return nil, nil, err
+	}
+
+	storeName = strings.TrimSpace(storeName)
+	if storeName == "" {
+		storeName = name + "'s Store"
+	}
+
+	// Empty password hash: column stays NOT NULL, and bcrypt can never
+	// match it, so password-login for Google users safely 401s.
+	user, err = s.users.RegisterTx(ctx, storeName, email, name, "")
+	if err != nil {
+		if errors.Is(err, repo.ErrDuplicate) {
+			return nil, nil, ErrEmailTaken
+		}
+		return nil, nil, err
+	}
+	pair, err := s.issueTokens(ctx, user.ID, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, pair, nil
+}
+
+func stringClaim(claims map[string]interface{}, key string) string {
+	v, _ := claims[key].(string)
+	return v
+}
+
+// Google sends email_verified as bool; accept "true"/1 defensively.
+func googleEmailVerified(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	case float64:
+		return t == 1
+	default:
+		return false
+	}
 }
 
 func (s *AuthService) Me(ctx context.Context, claims *Claims) (*model.PublicUser, error) {

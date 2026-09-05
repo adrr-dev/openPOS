@@ -17,6 +17,9 @@ type Config struct {
 	AccessTTL      time.Duration
 	RefreshTTLDays int
 	CORSOrigins    []string
+	// GoogleClientID enables POST /auth/google (GIS ID-token flow).
+	// Empty = endpoint returns "not configured"; OTP flow unaffected.
+	GoogleClientID string
 }
 
 func Load() (*Config, error) {
@@ -28,6 +31,7 @@ func Load() (*Config, error) {
 		JWTSecret:      os.Getenv("JWT_SECRET"),
 		AccessTTL:      15 * time.Minute,
 		RefreshTTLDays: 7,
+		GoogleClientID: strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
 	}
 
 	if cfg.DatabaseURL == "" {

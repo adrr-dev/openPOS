@@ -62,14 +62,14 @@ func (h *CatalogHandler) DeleteCategory(c *gin.Context) {
 }
 
 type productReq struct {
-	Name       string  `json:"name"`
-	SKU        string  `json:"sku"`
-	Barcode    string  `json:"barcode"`
-	CategoryID *uint `json:"categoryId"`
-	BuyPrice   *int64  `json:"buyPrice"`
-	SellPrice  int64   `json:"sellPrice"`
-	Stock      *int    `json:"stock"`
-	Unit       string  `json:"unit"`
+	Name       string `json:"name"`
+	SKU        string `json:"sku"`
+	Barcode    string `json:"barcode"`
+	CategoryID *uint  `json:"categoryId"`
+	BuyPrice   *int64 `json:"buyPrice"`
+	SellPrice  int64  `json:"sellPrice"`
+	Stock      *int   `json:"stock"`
+	Unit       string `json:"unit"`
 }
 
 func (h *CatalogHandler) ListProducts(c *gin.Context) {
