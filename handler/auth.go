@@ -34,6 +34,16 @@ type otpVerifyReq struct {
 	Code  string `json:"code"`
 }
 
+type forgotPasswordSendReq struct {
+	Email string `json:"email"`
+}
+
+type forgotPasswordResetReq struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
+	NewPassword string `json:"new_password"`
+}
+
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -89,6 +99,49 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"verified": true, "message": "Email berhasil diverifikasi."})
+}
+
+func (h *AuthHandler) SendPasswordResetOTP(c *gin.Context) {
+	var req forgotPasswordSendReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
+		return
+	}
+	err := h.auth.SendPasswordResetOTP(c.Request.Context(), req.Email)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Akun dengan email tersebut tidak ditemukan."})
+			return
+		}
+		respondOTPErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Kode OTP pemulihan sandi terkirim ke email Anda."})
+}
+
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req forgotPasswordResetReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
+		return
+	}
+	err := h.auth.ResetPassword(c.Request.Context(), req.Email, req.Code, req.NewPassword)
+	if err != nil {
+		switch {
+		case errors.Is(err, repo.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Akun tidak ditemukan."})
+		case errors.Is(err, service.ErrOtpWrong):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Kode OTP salah."})
+		case errors.Is(err, service.ErrOtpExpired):
+			c.JSON(http.StatusGone, gin.H{"error": "Kode OTP sudah kedaluwarsa. Kirim ulang."})
+		case errors.Is(err, service.ErrOtpMaxAttempts):
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru."})
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {

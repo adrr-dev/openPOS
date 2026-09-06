@@ -100,6 +100,8 @@ func New(ctx context.Context) (*Server, error) {
 		v1.POST("/auth/logout", authH.Logout)
 		v1.POST("/auth/otp/send", authH.SendOTP)
 		v1.POST("/auth/otp/verify", authH.VerifyOTP)
+		v1.POST("/auth/forgot-password/send", authH.SendPasswordResetOTP)
+		v1.POST("/auth/forgot-password/reset", authH.ResetPassword)
 
 		// Authenticated
 		authGroup := v1.Group("")

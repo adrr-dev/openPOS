@@ -110,6 +110,50 @@ Memverifikasi 6 digit kode OTP yang dikirimkan ke email. Sukses menandai email t
   * `410 Gone` — `{"error": "Kode OTP sudah kedaluwarsa. Kirim ulang."}`
   * `429 Too Many Requests` — `{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."}`
 
+#### `POST /auth/forgot-password/send`
+Mengirim kode OTP 6 digit ke email pengguna untuk proses pemulihan/lupa kata sandi (khusus akun non-Google).
+* **Autentikasi:** Publik (Tanpa token)
+* **Request Expected:**
+  ```json
+  {
+    "email": "sari@tokosaya.com"
+  }
+  ```
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Kode OTP pemulihan sandi terkirim ke email Anda."
+  }
+  ```
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "Email tidak valid."}`
+  * `404 Not Found` — `{"error": "Akun dengan email tersebut tidak ditemukan."}`
+  * `429 Too Many Requests` — `{"error": "Terlalu sering meminta kode. Coba lagi dalam 60 detik."}`
+
+#### `POST /auth/forgot-password/reset`
+Memverifikasi kode OTP pemulihan dan memperbarui kata sandi akun dengan yang baru.
+* **Autentikasi:** Publik (Tanpa token)
+* **Request Expected:**
+  ```json
+  {
+    "email": "sari@tokosaya.com",
+    "code": "482913",
+    "new_password": "passwordbaruminimal8karakter"
+  }
+  ```
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Kata sandi berhasil diubah. Silakan masuk dengan kata sandi baru."
+  }
+  ```
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "kata sandi minimal 8 karakter"}`
+  * `400 Bad Request` — `{"error": "Kode OTP salah."}`
+  * `410 Gone` — `{"error": "Kode OTP sudah kedaluwarsa. Kirim ulang."}`
+  * `429 Too Many Requests` — `{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."}`
+  * `404 Not Found` — `{"error": "Akun tidak ditemukan."}`
+
 #### `POST /auth/register`
 Mendaftarkan Toko (Store) baru sekaligus membuat akun Admin pertama untuk toko tersebut (Memerlukan email yang sudah diverifikasi OTP sebelumnya), lalu otomatis login (mengembalikan token).
 * **Autentikasi:** Publik (Tanpa token)

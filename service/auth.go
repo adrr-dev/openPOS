@@ -155,6 +155,133 @@ func (s *AuthService) VerifyOTP(ctx context.Context, email, code string) error {
 	return nil
 }
 
+func (s *AuthService) SendPasswordResetOTP(ctx context.Context, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !isEmail(email) {
+		return ErrInvalidEmail
+	}
+
+	_, err := s.users.GetByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return repo.ErrNotFound
+		}
+		return err
+	}
+
+	existing, err := s.otps.GetOTP(ctx, email)
+	if err == nil && existing != nil {
+		if time.Since(existing.LastSentAt) < 60*time.Second {
+			return ErrOtpCooldown
+		}
+	}
+
+	code, err := generate6DigitOTP()
+	if err != nil {
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	expiresAt := time.Now().Add(10 * time.Minute)
+	if err := s.otps.UpsertOTP(ctx, email, string(hash), expiresAt); err != nil {
+		return err
+	}
+
+	if TestOnOTPSent != nil {
+		TestOnOTPSent(email, code)
+	}
+
+	if err := sendPasswordResetOTPEmail(email, code); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPassword string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	code = strings.TrimSpace(code)
+	newPassword = strings.TrimSpace(newPassword)
+
+	if len(newPassword) < 8 {
+		return fmt.Errorf("kata sandi minimal 8 karakter")
+	}
+
+	o, err := s.otps.GetOTP(ctx, email)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return ErrOtpWrong
+		}
+		return err
+	}
+
+	if o.Attempts >= 3 {
+		return ErrOtpMaxAttempts
+	}
+
+	if time.Now().After(o.ExpiresAt) {
+		return ErrOtpExpired
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(o.CodeHash), []byte(code)) != nil {
+		attempts, _ := s.otps.IncrementAttempts(ctx, email)
+		if attempts >= 3 {
+			return ErrOtpMaxAttempts
+		}
+		return ErrOtpWrong
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	if err := s.users.UpdatePassword(ctx, email, string(hash)); err != nil {
+		return err
+	}
+
+	_ = s.otps.RevokeOTP(ctx, email)
+
+	return nil
+}
+
+func sendPasswordResetOTPEmail(toEmail, otpCode string) error {
+	host := getEnv("SMTP_HOST", "smtp.gmail.com")
+	port := getEnv("SMTP_PORT", "587")
+	user := getEnv("SMTP_EMAIL", getEnv("SMTP_USER", ""))
+	pass := getEnv("SMTP_PASSWORD", getEnv("SMTP_PASS", ""))
+	from := getEnv("SMTP_FROM", user)
+
+	subject := "Kode Pemulihan Kata Sandi OpenPOS"
+	body := fmt.Sprintf("Halo,\n\nKode pemulihan kata sandi OpenPOS Anda adalah: %s\n\nKode ini berlaku selama 10 menit. Jangan berikan kode ini kepada siapa pun.\n\nSalam,\nTim OpenPOS", otpCode)
+
+	msg := "From: " + from + "\r\n" +
+		"To: " + toEmail + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
+		body
+
+	if user == "" || pass == "" {
+		log.Printf("[DEV/MOCK EMAIL] To: %s | Reset OTP Code: %s", toEmail, otpCode)
+		return nil
+	}
+
+	auth := smtp.PlainAuth("", user, pass, host)
+	addr := host + ":" + port
+	err := smtp.SendMail(addr, auth, from, []string{toEmail}, []byte(msg))
+	if err != nil {
+		log.Printf("[SMTP WARNING] Failed to send email to %s: %v. Falling back to console log. Reset OTP was: %s", toEmail, err, otpCode)
+		log.Printf("[DEV/MOCK EMAIL FALLBACK] To: %s | Reset OTP Code: %s", toEmail, otpCode)
+		return nil
+	}
+	return nil
+}
+
 func generate6DigitOTP() (string, error) {
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))
 	if err != nil {

@@ -114,3 +114,14 @@ func (r *UserRepo) RegisterTx(ctx context.Context, storeName, email, name, passw
 	}
 	return user, nil
 }
+
+func (r *UserRepo) UpdatePassword(ctx context.Context, email string, passwordHash string) error {
+	res := r.db.WithContext(ctx).Model(&model.User{}).Where("email = ?", email).Update("password_hash", passwordHash)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
