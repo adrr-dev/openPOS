@@ -662,7 +662,7 @@ Menyelesaikan proses transaksi penjualan POS belanja (Checkout). Stok barang oto
     "change": 5900,
     "status": "completed",
     "customer": "Budi Santoso",
-    "time": "2026-08-27T11:00:00Z"
+    "created_at": "2026-08-27T11:00:00Z"
   }
   ```
 * **Expected Errors:**
@@ -700,7 +700,7 @@ Mendapatkan daftar data riwayat transaksi penjualan.
         "change": 5900,
         "status": "completed",
         "customer": "Budi Santoso",
-        "time": "2026-08-27T11:00:00Z"
+        "created_at": "2026-08-27T11:00:00Z"
       }
     ],
     "total": 1,
@@ -814,7 +814,7 @@ Mendapatkan laporan matriks ringkas harian yang disesuaikan secara dinamis berda
         "cashier_name": "Andi Kasir",
         "total": 131000,
         "status": "completed",
-        "time": "2026-08-27T10:30:00Z"
+        "created_at": "2026-08-27T10:30:00Z"
       }
     ]
   }
@@ -835,7 +835,7 @@ Mendapatkan laporan matriks ringkas harian yang disesuaikan secara dinamis berda
         "cashier_name": "Andi Kasir",
         "total": 50000,
         "status": "completed",
-        "time": "2026-08-27T09:45:00Z"
+        "created_at": "2026-08-27T09:45:00Z"
       }
     ]
   }
