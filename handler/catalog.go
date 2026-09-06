@@ -164,6 +164,19 @@ func (h *CatalogHandler) SetProductActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Status produk diperbarui."})
 }
 
+func (h *CatalogHandler) DeleteProduct(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteProduct(c.Request.Context(), claims.StoreID, id); err != nil {
+		respondCatalogErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Produk berhasil dihapus."})
+}
+
 func productInputFrom(req *productReq) service.ProductInput {
 	in := service.ProductInput{
 		Name:       req.Name,

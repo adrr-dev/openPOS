@@ -138,6 +138,7 @@ func New(ctx context.Context) (*Server, error) {
 				adminGroup.POST("/products", catalogH.CreateProduct)
 				adminGroup.PUT("/products/:id", catalogH.UpdateProduct)
 				adminGroup.PATCH("/products/:id/active", catalogH.SetProductActive)
+				adminGroup.DELETE("/products/:id", catalogH.DeleteProduct)
 				adminGroup.GET("/movements", stockH.ListMovements)
 				adminGroup.POST("/stock/adjustments", stockH.AdjustStock)
 				adminGroup.POST("/transactions/:id/refund", trxH.Refund)

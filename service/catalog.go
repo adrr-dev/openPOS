@@ -216,3 +216,11 @@ func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID uin
 func (s *CatalogService) ListMovements(ctx context.Context, storeID uint, f repo.MovementFilter) (*repo.MovementPage, error) {
 	return s.movs.List(ctx, storeID, f)
 }
+
+func (s *CatalogService) DeleteProduct(ctx context.Context, storeID, id uint) error {
+	err := s.prods.Delete(ctx, storeID, id)
+	if errors.Is(err, repo.ErrNotFound) {
+		return ErrStoreMismatch
+	}
+	return err
+}

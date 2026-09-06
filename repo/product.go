@@ -208,3 +208,14 @@ func (r *ProductRepo) AdjustStock(ctx context.Context, storeID, productID uint, 
 	}
 	return r.GetByID(ctx, storeID, productID)
 }
+
+func (r *ProductRepo) Delete(ctx context.Context, storeID, id uint) error {
+	res := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).Delete(&model.Product{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

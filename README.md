@@ -555,6 +555,18 @@ Mengubah status aktif/nonaktif dari suatu produk. Produk yang dinonaktifkan tida
   }
   ```
 
+#### `DELETE /products/{id}` 🔒 Admin
+Menghapus produk dari katalog toko secara permanen.
+* **Autentikasi:** Bearer Token (Hanya Admin)
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Produk berhasil dihapus."
+  }
+  ```
+* **Expected Errors:**
+  * `404 Not Found` — `{"error": "Produk tidak ditemukan."}`
+
 ---
 
 ### 📈 Stok & Riwayat Mutasi (Inventory) 🔒 Admin
