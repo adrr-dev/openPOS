@@ -48,17 +48,14 @@ func (s *ShiftService) resolveCashier(ctx context.Context, storeID uint, actingA
 }
 
 func (s *ShiftService) GetCashierShift(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string) (any, error) {
-	cashierID, cashierName, err := s.resolveCashier(ctx, storeID, actingAsCashierID, fallbackName)
+	cashierID, _, err := s.resolveCashier(ctx, storeID, actingAsCashierID, fallbackName)
 	if err != nil {
 		return nil, err
 	}
 
 	shift, err := s.shifts.GetActiveShift(ctx, storeID, cashierID)
 	if err != nil {
-		shift, err = s.shifts.StartShift(ctx, storeID, cashierID, cashierName, 0)
-		if err != nil {
-			return nil, err
-		}
+		return nil, ErrNoActiveShift
 	}
 
 	now := time.Now()

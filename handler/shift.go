@@ -26,7 +26,11 @@ func (h *ShiftHandler) GetCurrentShift(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	data, err := h.svc.GetCashierShift(c.Request.Context(), claims.StoreID, claims.ActingAsCashierID, claims.Name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat shift kasir."})
+		if errors.Is(err, service.ErrNoActiveShift) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "tidak ada shift yang berjalan"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat shift."})
 		return
 	}
 	c.JSON(http.StatusOK, data)
