@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xMinomus/openPOS/backend/service"
+	"github.com/adrr-dev/openPOS/backend/service"
 )
 
 func TestAPIIntegrationFlow(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/0xMinomus/openPOS/backend/middleware"
-	"github.com/0xMinomus/openPOS/backend/service"
+	"github.com/adrr-dev/openPOS/backend/middleware"
+	"github.com/adrr-dev/openPOS/backend/service"
 )
 
 type UserHandler struct {

@@ -9,13 +9,13 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/0xMinomus/openPOS/backend/config"
-	"github.com/0xMinomus/openPOS/backend/db"
-	"github.com/0xMinomus/openPOS/backend/handler"
-	"github.com/0xMinomus/openPOS/backend/middleware"
-	"github.com/0xMinomus/openPOS/backend/model"
-	"github.com/0xMinomus/openPOS/backend/repo"
-	"github.com/0xMinomus/openPOS/backend/service"
+	"github.com/adrr-dev/openPOS/backend/config"
+	"github.com/adrr-dev/openPOS/backend/db"
+	"github.com/adrr-dev/openPOS/backend/handler"
+	"github.com/adrr-dev/openPOS/backend/middleware"
+	"github.com/adrr-dev/openPOS/backend/model"
+	"github.com/adrr-dev/openPOS/backend/repo"
+	"github.com/adrr-dev/openPOS/backend/service"
 )
 
 type Server struct {
@@ -53,12 +53,14 @@ func New(ctx context.Context) (*Server, error) {
 	trxRepo := repo.NewTrxRepo(database)
 	storeRepo := repo.NewStoreRepo(database)
 	reportRepo := repo.NewReportRepo(database)
+	shiftRepo := repo.NewShiftRepo(database)
 
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour, cfg.GoogleClientID)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
 	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
 	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
+	shiftSvc := service.NewShiftService(shiftRepo, cashierRepo, storeRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)
@@ -66,6 +68,7 @@ func New(ctx context.Context) (*Server, error) {
 	stockH := handler.NewStockHandler(catalogSvc)
 	trxH := handler.NewTrxHandler(trxSvc)
 	settingsH := handler.NewSettingsHandler(settingsSvc)
+	shiftH := handler.NewShiftHandler(shiftSvc)
 	healthH := handler.NewHealthHandler(database)
 
 	r := gin.New()
@@ -118,6 +121,9 @@ func New(ctx context.Context) (*Server, error) {
 			authGroup.GET("/transactions/:id", trxH.Get)
 			authGroup.GET("/settings", settingsH.Get)
 			authGroup.GET("/dashboard", settingsH.Dashboard)
+			authGroup.GET("/cashier/shift", shiftH.GetCurrentShift)
+			authGroup.POST("/cashier/shift/start", shiftH.StartShift)
+			authGroup.POST("/cashier/shift/close", shiftH.CloseShift)
 
 			// Admin only
 			adminGroup := authGroup.Group("")
@@ -138,6 +144,7 @@ func New(ctx context.Context) (*Server, error) {
 				adminGroup.PUT("/settings", settingsH.Update)
 				adminGroup.PUT("/users/:id/passcode", settingsH.SetPasscode)
 				adminGroup.GET("/reports", settingsH.Report)
+				adminGroup.GET("/shifts", shiftH.ListShifts)
 			}
 		}
 	}

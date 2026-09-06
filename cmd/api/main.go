@@ -11,7 +11,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
-	router "github.com/0xMinomus/openPOS/backend/router"
+	router "github.com/adrr-dev/openPOS/backend/router"
 )
 
 func main() {

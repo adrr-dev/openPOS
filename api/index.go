@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	router "github.com/0xMinomus/openPOS/backend/router"
+	router "github.com/adrr-dev/openPOS/backend/router"
 )
 
 var (

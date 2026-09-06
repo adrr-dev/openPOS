@@ -1,4 +1,4 @@
-module github.com/0xMinomus/openPOS/backend
+module github.com/adrr-dev/openPOS/backend
 
 go 1.26.0
 

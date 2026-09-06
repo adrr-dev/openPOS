@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/adrr-dev/openPOS/backend/model"
 )
 
 type OtpRepo struct {

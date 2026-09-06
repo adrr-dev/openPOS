@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/0xMinomus/openPOS/backend/middleware"
-	"github.com/0xMinomus/openPOS/backend/model"
-	"github.com/0xMinomus/openPOS/backend/repo"
-	"github.com/0xMinomus/openPOS/backend/service"
+	"github.com/adrr-dev/openPOS/backend/middleware"
+	"github.com/adrr-dev/openPOS/backend/model"
+	"github.com/adrr-dev/openPOS/backend/repo"
+	"github.com/adrr-dev/openPOS/backend/service"
 )
 
 type SettingsHandler struct {

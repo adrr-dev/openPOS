@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/0xMinomus/openPOS/backend/model"
+	"github.com/adrr-dev/openPOS/backend/model"
 )
 
 // DB_DRIVER selects the database explicitly:
@@ -89,5 +89,6 @@ func Migrate(db *gorm.DB) error {
 		&model.Trx{},
 		&model.TransactionItem{},
 		&model.Refund{},
+		&model.CashierShift{},
 	)
 }

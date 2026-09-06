@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/0xMinomus/openPOS/backend/config"
-	"github.com/0xMinomus/openPOS/backend/db"
+	"github.com/adrr-dev/openPOS/backend/config"
+	"github.com/adrr-dev/openPOS/backend/db"
 )
 
 func main() {

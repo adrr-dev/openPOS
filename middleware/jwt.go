@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/0xMinomus/openPOS/backend/service"
+	"github.com/adrr-dev/openPOS/backend/service"
 )
 
 const claimsKey = "claims"

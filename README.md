@@ -752,6 +752,90 @@ Memproses pengembalian barang (Refund) sebagian atau seluruhnya dari suatu trans
 
 ---
 
+### ⏱️ Shift Kasir (Cashier Shifts)
+
+#### `GET /cashier/shift`
+Mendapatkan ringkasan shift kasir yang sedang berjalan beserta data analitik (omzet per jam dan produk terlaris).
+* **Autentikasi:** Bearer Token (Semua Role)
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "shift": {
+      "started_at": "2026-09-06T08:42:00Z",
+      "opening_cash": 500000,
+      "sales": 637500,
+      "trx_count": 1
+    },
+    "hourly": [
+      { "hour": 8, "omzet": 0 },
+      { "hour": 9, "omzet": 125000 }
+    ],
+    "top_products": [
+      { "product_id": 1, "name": "Beras Premium 5kg", "qty": 12 }
+    ]
+  }
+  ```
+
+#### `POST /cashier/shift/start`
+Memulai shift kasir baru. Shift aktif sebelumnya otomatis ditutup.
+* **Autentikasi:** Bearer Token (Semua Role)
+* **Request Expected:**
+  ```json
+  {
+    "opening_cash": 500000
+  }
+  ```
+* **Response Sukses (`201 Created`):**
+  ```json
+  {
+    "shift": {
+      "started_at": "2026-09-06T08:42:00Z",
+      "opening_cash": 500000,
+      "sales": 0,
+      "trx_count": 0
+    }
+  }
+  ```
+
+#### `POST /cashier/shift/close`
+Menutup shift kasir yang sedang berjalan dan mengembalikan ringkasan penjualan.
+* **Autentikasi:** Bearer Token (Semua Role)
+* **Request Expected:** `{}`
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Shift ditutup.",
+    "summary": {
+      "sales": 637500,
+      "trx_count": 1
+    }
+  }
+  ```
+* **Expected Errors:**
+  * `400 Bad Request` — `{"error": "Tidak ada shift yang berjalan."}`
+
+#### `GET /shifts` 🔒 Admin
+Mendapatkan log seluruh riwayat shift toko (terbaru dulu) untuk rekapitulasi kinerja kasir.
+* **Autentikasi:** Bearer Token (Hanya Admin)
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "shifts": [
+      {
+        "id": 1,
+        "cashier_name": "Andi Kasir",
+        "started_at": "2026-09-06T08:42:00Z",
+        "closed_at": "2026-09-06T15:30:00Z",
+        "opening_cash": 500000,
+        "sales": 637500,
+        "trx_count": 1
+      }
+    ]
+  }
+  ```
+
+---
+
 ### ⚙️ Pengaturan Toko (Store Settings)
 
 #### `GET /settings`
