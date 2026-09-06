@@ -374,6 +374,18 @@ Mengubah status aktif (aktifkan atau nonaktifkan) akun kasir.
   * `400 Bad Request` — `{"error": "Hanya akun kasir yang dapat dinonaktifkan."}` (Akun admin tidak bisa dinonaktifkan lewat sini).
   * `404 Not Found` — `{"error": "Akun tidak ditemukan di toko Anda."}`
 
+#### `DELETE /users/{id}`
+Menghapus akun kasir dari toko secara permanen.
+* **Autentikasi:** Bearer Token (Hanya Admin)
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "message": "Akun kasir berhasil dihapus."
+  }
+  ```
+* **Expected Errors:**
+  * `404 Not Found` — `{"error": "Akun tidak ditemukan di toko Anda."}`
+
 #### `PUT /users/{id}/passcode`
 Mengatur atau menghapus Passcode/PIN 5-digit milik akun kasir tertentu.
 * **Autentikasi:** Bearer Token (Hanya Admin)

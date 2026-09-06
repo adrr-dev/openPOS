@@ -80,3 +80,17 @@ func (s *UserService) SetActive(ctx context.Context, storeID, targetID uint, act
 	}
 	return s.cashiers.SetActive(ctx, targetID, active)
 }
+
+func (s *UserService) Delete(ctx context.Context, storeID, targetID uint) error {
+	c, err := s.cashiers.GetByID(ctx, targetID)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return ErrStoreMismatch
+		}
+		return err
+	}
+	if c.StoreID != storeID {
+		return ErrStoreMismatch
+	}
+	return s.cashiers.Delete(ctx, targetID)
+}

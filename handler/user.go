@@ -71,6 +71,19 @@ func (h *UserHandler) SetActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
+func (h *UserHandler) Delete(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.svc.Delete(c.Request.Context(), claims.StoreID, id); err != nil {
+		respondUserErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Akun kasir berhasil dihapus."})
+}
+
 func respondUserErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrEmailTaken):

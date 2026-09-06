@@ -79,3 +79,14 @@ func (r *CashierRepo) GetOrCreateDefault(ctx context.Context, storeID uint, defa
 	}
 	return created.ID, nil
 }
+
+func (r *CashierRepo) Delete(ctx context.Context, id uint) error {
+	res := r.db.WithContext(ctx).Delete(&model.Cashier{}, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
