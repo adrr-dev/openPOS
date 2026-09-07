@@ -72,38 +72,41 @@ func (Cashier) TableName() string {
 
 func (c *Cashier) Public(storeName string) PublicUser {
 	return PublicUser{
-		ID:        c.ID,
-		Email:     "",
-		Name:      c.Name,
-		Role:      RoleCashier,
-		Active:    c.Active,
-		StoreID:   c.StoreID,
-		StoreName: storeName,
-		CreatedAt: c.CreatedAt,
+		ID:           c.ID,
+		Email:        "",
+		Name:         c.Name,
+		Role:         RoleCashier,
+		Active:       c.Active,
+		StoreID:      c.StoreID,
+		StoreName:    storeName,
+		CreatedAt:    c.CreatedAt,
+		HasPasscode:  c.PasscodeHash != nil && *c.PasscodeHash != "",
 	}
 }
 
 type PublicUser struct {
-	ID        uint      `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Role      Role      `json:"role"`
-	Active    bool      `json:"active"`
-	StoreID   uint      `json:"store_id"`
-	StoreName string    `json:"store_name,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	ID          uint      `json:"id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Role        Role      `json:"role"`
+	Active      bool      `json:"active"`
+	StoreID     uint      `json:"store_id"`
+	StoreName   string    `json:"store_name,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+	HasPasscode bool      `json:"has_passcode"`
 }
 
 func (u *User) Public() PublicUser {
 	return PublicUser{
-		ID:        u.ID,
-		Email:     u.Email,
-		Name:      u.Name,
-		Role:      u.Role,
-		Active:    u.Active,
-		StoreID:   u.StoreID,
-		StoreName: u.StoreName,
-		CreatedAt: u.CreatedAt,
+		ID:          u.ID,
+		Email:       u.Email,
+		Name:        u.Name,
+		Role:        u.Role,
+		Active:      u.Active,
+		StoreID:     u.StoreID,
+		StoreName:   u.StoreName,
+		CreatedAt:   u.CreatedAt,
+		HasPasscode: u.PasscodeHash != nil && *u.PasscodeHash != "",
 	}
 }
 

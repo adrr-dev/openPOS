@@ -540,27 +540,46 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
 	_ = s.refresh.Revoke(ctx, hashToken(refreshToken))
 }
 
-func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint, passcode string) (*model.PublicUser, *model.TokenPair, error) {
+func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint, passcode string, roleHint ...string) (*model.PublicUser, *model.TokenPair, error) {
 	owner, err := s.users.GetByID(ctx, claims.UserID)
 	if err != nil || !owner.Active {
 		return nil, nil, ErrTokenInvalid
 	}
 
-	// NOTE: users and cashiers live in separate tables with independent
-	// numeric sequences, so an owner and a cashier can share the same number
-	// (e.g. both id 1). Disambiguate by session state, never by number alone.
-	if claims.ActingAsCashierID != nil {
-		if targetID == *claims.ActingAsCashierID {
-			return nil, nil, ErrSwitchSelf
-		}
-		if targetID == owner.ID {
-			return s.switchToOwner(ctx, owner, passcode)
-		}
-		return s.switchToCashier(ctx, owner, targetID, passcode)
+	hint := ""
+	if len(roleHint) > 0 {
+		hint = roleHint[0]
 	}
 
-	// Acting as admin: a cashier wins ties (it is the only reachable
-	// interpretation that isn't "self"); self-switch stays 400 like before.
+	if hint == "cashier" {
+		if claims.ActingAsCashierID != nil && targetID == *claims.ActingAsCashierID {
+			return nil, nil, ErrSwitchSelf
+		}
+		if c, err := s.cashiers.GetByID(ctx, targetID); err == nil && c.StoreID == owner.StoreID {
+			if !c.Active {
+				return nil, nil, ErrAccountInactive
+			}
+			if err := checkPasscode(c.PasscodeHash, passcode); err != nil {
+				return nil, nil, err
+			}
+			pair, err := s.issueTokens(ctx, owner.ID, &c.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			pub := c.Public(owner.StoreName)
+			return &pub, pair, nil
+		}
+		return nil, nil, repo.ErrNotFound
+	}
+
+	if hint == "admin" {
+		return s.switchToOwner(ctx, owner, passcode)
+	}
+
+	// Default: check cashier first, then owner
+	if claims.ActingAsCashierID != nil && targetID == *claims.ActingAsCashierID {
+		return nil, nil, ErrSwitchSelf
+	}
 	if c, err := s.cashiers.GetByID(ctx, targetID); err == nil && c.StoreID == owner.StoreID {
 		if !c.Active {
 			return nil, nil, ErrAccountInactive
@@ -575,9 +594,11 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		pub := c.Public(owner.StoreName)
 		return &pub, pair, nil
 	}
+
 	if targetID == owner.ID {
-		return nil, nil, ErrSwitchSelf
+		return s.switchToOwner(ctx, owner, passcode)
 	}
+
 	return nil, nil, repo.ErrNotFound
 }
 

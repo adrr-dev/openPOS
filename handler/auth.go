@@ -61,6 +61,7 @@ type logoutReq struct {
 type switchReq struct {
 	TargetUserID uint   `json:"target_user_id"`
 	Passcode     string `json:"passcode,omitempty"`
+	Role         string `json:"role,omitempty"`
 }
 
 type googleReq struct {
@@ -228,7 +229,7 @@ func (h *AuthHandler) Switch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id wajib diisi"})
 		return
 	}
-	pubUser, pair, err := h.auth.Switch(c.Request.Context(), claims, req.TargetUserID, req.Passcode)
+	pubUser, pair, err := h.auth.Switch(c.Request.Context(), claims, req.TargetUserID, req.Passcode, req.Role)
 	if err != nil {
 		respondSwitchErr(c, err)
 		return

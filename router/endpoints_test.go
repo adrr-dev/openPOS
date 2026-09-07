@@ -186,11 +186,11 @@ func TestAllEndpoints(t *testing.T) {
 	expect("set cashier passcode -> 200", w, 200)
 
 	// ── 15. switch ─────────────────────────────────────────────
-	w, _ = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1}, adminTok)
+	w, _ = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1, "role": "cashier"}, adminTok)
 	expect("switch no passcode -> 401", w, 401)
-	w, _ = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1, "passcode": "00000"}, adminTok)
+	w, _ = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1, "passcode": "00000", "role": "cashier"}, adminTok)
 	expect("switch wrong passcode -> 401", w, 401)
-	w, resp = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1, "passcode": "11111"}, adminTok)
+	w, resp = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier1, "passcode": "11111", "role": "cashier"}, adminTok)
 	expect("switch to cashier -> 200", w, 200)
 	kTok := resp["access_token"].(string)
 	if resp["user"].(map[string]any)["role"] != "cashier" {

@@ -3,12 +3,17 @@ package router
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestNewHealth(t *testing.T) {
+	t.Setenv("DB_DRIVER", "sqlite")
+	t.Setenv("DATABASE_URL", filepath.Join(t.TempDir(), "health.db"))
+	t.Setenv("JWT_SECRET", "test-secret")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
