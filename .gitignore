@@ -5,4 +5,4 @@ tmp/
 supabase/
 hashpw
 cleardb
-openpos_test.db
+test.db

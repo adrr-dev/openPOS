@@ -48,17 +48,17 @@ var TestOnOTPSent func(email, code string)
 var VerifyGoogleToken = idtoken.Validate
 
 type AuthService struct {
-	users          *repo.UserRepo
-	cashiers       *repo.CashierRepo
-	refresh        *repo.RefreshRepo
-	otps           *repo.OtpRepo
+	users          UserRepository
+	cashiers       CashierRepository
+	refresh        RefreshRepository
+	otps           OtpRepository
 	jwtSecret      []byte
 	accessTTL      time.Duration
 	refreshTTL     time.Duration
 	googleClientID string
 }
 
-func NewAuthService(users *repo.UserRepo, cashiers *repo.CashierRepo, refresh *repo.RefreshRepo, otps *repo.OtpRepo, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration, googleClientID ...string) *AuthService {
+func NewAuthService(users UserRepository, cashiers CashierRepository, refresh RefreshRepository, otps OtpRepository, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration, googleClientID ...string) *AuthService {
 	svc := &AuthService{
 		users:      users,
 		cashiers:   cashiers,

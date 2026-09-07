@@ -8,11 +8,11 @@ import (
 )
 
 type TrxService struct {
-	trx      *repo.TrxRepo
-	cashiers *repo.CashierRepo
+	trx      TrxRepository
+	cashiers CashierRepository
 }
 
-func NewTrxService(trx *repo.TrxRepo, cashiers *repo.CashierRepo) *TrxService {
+func NewTrxService(trx TrxRepository, cashiers CashierRepository) *TrxService {
 	return &TrxService{trx: trx, cashiers: cashiers}
 }
 

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"sort"
 	"time"
-
-	"github.com/adrr-dev/openPOS/backend/repo"
 )
 
 var (
@@ -14,12 +12,12 @@ var (
 )
 
 type ShiftService struct {
-	shifts   *repo.ShiftRepo
-	cashiers *repo.CashierRepo
-	stores   *repo.StoreRepo
+	shifts   ShiftRepository
+	cashiers CashierRepository
+	stores   StoreRepository
 }
 
-func NewShiftService(shifts *repo.ShiftRepo, cashiers *repo.CashierRepo, stores *repo.StoreRepo) *ShiftService {
+func NewShiftService(shifts ShiftRepository, cashiers CashierRepository, stores StoreRepository) *ShiftService {
 	return &ShiftService{shifts: shifts, cashiers: cashiers, stores: stores}
 }
 

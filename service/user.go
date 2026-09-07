@@ -16,11 +16,11 @@ var (
 )
 
 type UserService struct {
-	users    *repo.UserRepo
-	cashiers *repo.CashierRepo
+	users    UserRepository
+	cashiers CashierRepository
 }
 
-func NewUserService(users *repo.UserRepo, cashiers *repo.CashierRepo) *UserService {
+func NewUserService(users UserRepository, cashiers CashierRepository) *UserService {
 	return &UserService{users: users, cashiers: cashiers}
 }
 

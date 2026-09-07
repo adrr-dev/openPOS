@@ -17,12 +17,12 @@ var (
 )
 
 type CatalogService struct {
-	cats  *repo.CategoryRepo
-	prods *repo.ProductRepo
-	movs  *repo.MovementRepo
+	cats  CategoryRepository
+	prods ProductRepository
+	movs  MovementRepository
 }
 
-func NewCatalogService(cats *repo.CategoryRepo, prods *repo.ProductRepo, movs *repo.MovementRepo) *CatalogService {
+func NewCatalogService(cats CategoryRepository, prods ProductRepository, movs MovementRepository) *CatalogService {
 	return &CatalogService{cats: cats, prods: prods, movs: movs}
 }
 

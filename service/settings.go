@@ -10,17 +10,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/adrr-dev/openPOS/backend/model"
-	"github.com/adrr-dev/openPOS/backend/repo"
 )
 
 type SettingsService struct {
-	stores   *repo.StoreRepo
-	users    *repo.UserRepo
-	cashiers *repo.CashierRepo
-	reports  *repo.ReportRepo
+	stores   StoreRepository
+	users    UserRepository
+	cashiers CashierRepository
+	reports  ReportRepository
 }
 
-func NewSettingsService(stores *repo.StoreRepo, users *repo.UserRepo, cashiers *repo.CashierRepo, reports *repo.ReportRepo) *SettingsService {
+func NewSettingsService(stores StoreRepository, users UserRepository, cashiers CashierRepository, reports ReportRepository) *SettingsService {
 	return &SettingsService{stores: stores, users: users, cashiers: cashiers, reports: reports}
 }
 
