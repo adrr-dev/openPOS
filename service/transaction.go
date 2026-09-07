@@ -40,7 +40,7 @@ func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashier
 			cashierName = c.Name
 		}
 	} else {
-		defID, err := s.cashiers.GetOrCreateDefault(ctx, storeID, fallbackName)
+		defID, err := s.cashiers.GetOrCreateByName(ctx, storeID, fallbackName)
 		if err != nil {
 			return nil, err
 		}

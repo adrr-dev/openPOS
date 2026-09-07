@@ -24,7 +24,7 @@ type CashierRepository interface {
 	Create(ctx context.Context, storeID uint, name string) (*model.Cashier, error)
 	SetActive(ctx context.Context, id uint, active bool) error
 	SetPasscode(ctx context.Context, id uint, hash *string) error
-	GetOrCreateDefault(ctx context.Context, storeID uint, defaultName string) (uint, error)
+	GetOrCreateByName(ctx context.Context, storeID uint, name string) (uint, error)
 	Delete(ctx context.Context, id uint) error
 }
 

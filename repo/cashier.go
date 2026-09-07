@@ -67,13 +67,13 @@ func (r *CashierRepo) SetPasscode(ctx context.Context, id uint, hash *string) er
 	return nil
 }
 
-func (r *CashierRepo) GetOrCreateDefault(ctx context.Context, storeID uint, defaultName string) (uint, error) {
+func (r *CashierRepo) GetOrCreateByName(ctx context.Context, storeID uint, name string) (uint, error) {
 	var c model.Cashier
-	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").First(&c).Error
+	err := r.db.WithContext(ctx).Where("store_id = ? AND name = ?", storeID, name).First(&c).Error
 	if err == nil {
 		return c.ID, nil
 	}
-	created, err := r.Create(ctx, storeID, defaultName)
+	created, err := r.Create(ctx, storeID, name)
 	if err != nil {
 		return 0, err
 	}

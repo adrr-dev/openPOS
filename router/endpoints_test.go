@@ -397,10 +397,9 @@ func TestAllEndpoints(t *testing.T) {
 	}
 	w, resp = doReq("GET", "/transactions", nil, kTok)
 	expect("list trx cashier -> 200", w, 200)
-	// QUIRK (matches old backend, not a bug): admin checkouts without
-	// acting-as attach to the FIRST cashier via GetOrCreateDefault, so the
-	// QRIS trx above belongs to Kasir1 too -> total 2, not 1.
-	if int(resp["total"].(float64)) != 2 {
+	// Admin checkouts without acting-as now attach to the admin's own cashier record
+	// via GetOrCreateByName, so admin checkouts do not leak into Kasir1 -> total 1.
+	if int(resp["total"].(float64)) != 1 {
 		t.Fatalf("trx cashier list: %v", resp)
 	}
 	// True isolation: Kasir2's own checkout must be invisible to Kasir1.
@@ -414,7 +413,7 @@ func TestAllEndpoints(t *testing.T) {
 	trxK2 := num(resp, "id")
 	w, resp = doReq("GET", "/transactions", nil, kTok)
 	expect("list trx cashier1 again -> 200", w, 200)
-	if int(resp["total"].(float64)) != 2 {
+	if int(resp["total"].(float64)) != 1 {
 		t.Fatalf("trx cashier1 isolation: %v", resp)
 	}
 	w, _ = doReq("GET", fmt.Sprintf("/transactions/%d", trxK2), nil, kTok)
