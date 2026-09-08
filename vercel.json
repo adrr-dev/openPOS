@@ -1,5 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "builds": [{ "src": "api/index.go", "use": "@vercel/go" }],
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index.go" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index.go" }],
+  "regions": ["sin1"],
+  "crons": [
+    {
+      "path": "/api/v1/health",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
