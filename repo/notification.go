@@ -1,0 +1,86 @@
+package repo
+
+import (
+	"context"
+
+	"gorm.io/gorm"
+
+	"github.com/adrr-dev/openPOS/backend/model"
+)
+
+type NotificationRepo struct {
+	db *gorm.DB
+}
+
+func NewNotificationRepo(db *gorm.DB) *NotificationRepo {
+	return &NotificationRepo{db: db}
+}
+
+func (r *NotificationRepo) Create(ctx context.Context, n *model.Notification) error {
+	return r.db.WithContext(ctx).Create(n).Error
+}
+
+func (r *NotificationRepo) List(ctx context.Context, storeID uint, page, limit int, unreadOnly bool) ([]*model.Notification, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := r.db.WithContext(ctx).Model(&model.Notification{}).Where("store_id = ?", storeID)
+	if unreadOnly {
+		query = query.Where("read = ?", false)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var items []*model.Notification
+	offset := (page - 1) * limit
+	err := query.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&items).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return items, int(total), nil
+}
+
+func (r *NotificationRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Notification, error) {
+	var n model.Notification
+	if err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&n).Error; err != nil {
+		return nil, mapDBErr(err)
+	}
+	return &n, nil
+}
+
+func (r *NotificationRepo) MarkAsRead(ctx context.Context, storeID, id uint) error {
+	res := r.db.WithContext(ctx).Model(&model.Notification{}).Where("id = ? AND store_id = ?", id, storeID).Update("read", true)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *NotificationRepo) MarkAllAsRead(ctx context.Context, storeID uint) error {
+	return r.db.WithContext(ctx).Model(&model.Notification{}).Where("store_id = ? AND read = ?", storeID, false).Update("read", true).Error
+}
+
+func (r *NotificationRepo) Delete(ctx context.Context, storeID, id uint) error {
+	res := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).Delete(&model.Notification{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

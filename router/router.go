@@ -54,6 +54,7 @@ func New(ctx context.Context) (*Server, error) {
 	storeRepo := repo.NewStoreRepo(database)
 	reportRepo := repo.NewReportRepo(database)
 	shiftRepo := repo.NewShiftRepo(database)
+	notificationRepo := repo.NewNotificationRepo(database)
 
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour, cfg.GoogleClientID)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
@@ -61,6 +62,7 @@ func New(ctx context.Context) (*Server, error) {
 	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
 	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
 	shiftSvc := service.NewShiftService(shiftRepo, cashierRepo, storeRepo)
+	notificationSvc := service.NewNotificationService(notificationRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)
@@ -69,6 +71,7 @@ func New(ctx context.Context) (*Server, error) {
 	trxH := handler.NewTrxHandler(trxSvc)
 	settingsH := handler.NewSettingsHandler(settingsSvc)
 	shiftH := handler.NewShiftHandler(shiftSvc)
+	notificationH := handler.NewNotificationHandler(notificationSvc)
 	healthH := handler.NewHealthHandler(database)
 
 	r := gin.New()
@@ -124,6 +127,10 @@ func New(ctx context.Context) (*Server, error) {
 			authGroup.GET("/cashier/shift", shiftH.GetCurrentShift)
 			authGroup.POST("/cashier/shift/start", shiftH.StartShift)
 			authGroup.POST("/cashier/shift/close", shiftH.CloseShift)
+			authGroup.GET("/notifications", notificationH.List)
+			authGroup.PATCH("/notifications/:id/read", notificationH.MarkAsRead)
+			authGroup.PATCH("/notifications/read-all", notificationH.MarkAllAsRead)
+			authGroup.DELETE("/notifications/:id", notificationH.Delete)
 
 			// Admin only
 			adminGroup := authGroup.Group("")

@@ -1016,6 +1016,54 @@ Menarik sekumpulan bundle laporan terperinci toko berdasarkan pilihan filter per
 
 ---
 
+### 🔔 Sistem Notifikasi (Notifications)
+
+#### `GET /notifications`
+Mengambil daftar notifikasi toko dengan dukungan paginasi dan filter unread.
+* **Autentikasi:** Bearer Token (Admin / Kasir)
+* **Query Parameters:**
+  * `page` (integer, opsional): Nomor halaman (default: `1`).
+  * `limit` (integer, opsional): Jumlah item per halaman (default: `20`).
+  * `unread` (boolean, opsional): Jika `true`, hanya menampilkan notifikasi yang belum dibaca.
+* **Response Sukses (`200 OK`):**
+  ```json
+  {
+    "items": [
+      {
+        "id": 1,
+        "created_at": "2026-09-09T12:00:00Z",
+        "updated_at": "2026-09-09T12:00:00Z",
+        "store_id": 1,
+        "title": "Stok Menipis",
+        "message": "Produk Beras Premium 5kg tersisa 3 unit.",
+        "type": "low_stock",
+        "read": false,
+        "reference_id": 12
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "limit": 20
+  }
+  ```
+
+#### `PATCH /notifications/:id/read`
+Menandai satu notifikasi tertentu sebagai sudah dibaca (`read = true`).
+* **Autentikasi:** Bearer Token (Admin / Kasir)
+* **Response Sukses (`200 OK`):** `{"status": "ok"}`
+
+#### `PATCH /notifications/read-all`
+Menandai seluruh notifikasi toko sebagai sudah dibaca.
+* **Autentikasi:** Bearer Token (Admin / Kasir)
+* **Response Sukses (`200 OK`):** `{"status": "ok"}`
+
+#### `DELETE /notifications/:id`
+Menghapus notifikasi berdasarkan ID.
+* **Autentikasi:** Bearer Token (Admin / Kasir)
+* **Response Sukses (`200 OK`):** `{"status": "ok"}`
+
+---
+
 ## ⚙️ Variabel Lingkungan (Environment Variables)
 
 Isi file konfigurasi `.env` sebelum menjalankan aplikasi:
