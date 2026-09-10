@@ -244,6 +244,9 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 		return err
 	}
 
+	if u, err := s.users.GetByEmail(ctx, email); err == nil {
+		_ = s.refresh.RevokeAllForUser(ctx, u.ID)
+	}
 	_ = s.otps.RevokeOTP(ctx, email)
 
 	return nil
@@ -631,6 +634,9 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 	}
 
 	if hint == "admin" {
+		if owner.PasscodeHash == nil || *owner.PasscodeHash == "" {
+			return nil, nil, ErrPasscodeRequired
+		}
 		if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
 			return nil, nil, err
 		}
@@ -668,6 +674,9 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 	}
 
 	if targetID == owner.ID {
+		if owner.PasscodeHash == nil || *owner.PasscodeHash == "" {
+			return nil, nil, ErrPasscodeRequired
+		}
 		if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
 			return nil, nil, err
 		}
@@ -686,6 +695,9 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 }
 
 func (s *AuthService) switchToOwner(ctx context.Context, owner *model.User, passcode string) (*model.PublicUser, *model.TokenPair, error) {
+	if owner.PasscodeHash == nil || *owner.PasscodeHash == "" {
+		return nil, nil, ErrPasscodeRequired
+	}
 	if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
 		return nil, nil, err
 	}

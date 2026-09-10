@@ -31,3 +31,20 @@ func queryID(q func(string) string, name string) uint {
 	}
 	return uint(n)
 }
+
+func clampLimit(limit int) int {
+	if limit < 1 {
+		return 20
+	}
+	if limit > 200 {
+		return 200
+	}
+	return limit
+}
+
+func clampPage(page int) int {
+	if page < 1 {
+		return 1
+	}
+	return page
+}

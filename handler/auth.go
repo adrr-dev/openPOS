@@ -83,6 +83,10 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 	}
 	err := h.auth.SendOTP(c.Request.Context(), req.Email)
 	if err != nil {
+		if errors.Is(err, service.ErrEmailTaken) {
+			c.JSON(http.StatusOK, gin.H{"message": "Jika email belum terdaftar, kode OTP telah dikirim."})
+			return
+		}
 		respondOTPErr(c, err)
 		return
 	}
@@ -112,13 +116,13 @@ func (h *AuthHandler) SendPasswordResetOTP(c *gin.Context) {
 	err := h.auth.SendPasswordResetOTP(c.Request.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Akun dengan email tersebut tidak ditemukan."})
+			c.JSON(http.StatusOK, gin.H{"message": "Jika email terdaftar, kode OTP telah dikirim."})
 			return
 		}
 		respondOTPErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Kode OTP pemulihan sandi terkirim ke email Anda."})
+	c.JSON(http.StatusOK, gin.H{"message": "Jika email terdaftar, kode OTP telah dikirim."})
 }
 
 func (h *AuthHandler) ResetPassword(c *gin.Context) {

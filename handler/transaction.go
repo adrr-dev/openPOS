@@ -63,6 +63,8 @@ func (h *TrxHandler) List(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(qp("page"))
 	limit, _ := strconv.Atoi(qp("limit"))
+	page = clampPage(page)
+	limit = clampLimit(limit)
 
 	list, total, err := h.svc.List(c.Request.Context(), claims.StoreID, cashierID,
 		qp("q"), qp("method"), qp("date"), page, limit)

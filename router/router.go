@@ -78,6 +78,7 @@ func New(ctx context.Context) (*Server, error) {
 	r := gin.New()
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+	r.Use(middleware.SecurityHeaders())
 	// 30s request timeout like old chi backend (chimw.Timeout).
 	// Literal bug: slow queries could hang forever.
 	r.Use(func(c *gin.Context) {
@@ -101,22 +102,22 @@ func New(ctx context.Context) (*Server, error) {
 
 		// Public
 		v1.POST("/auth/register", authH.Register)
-		v1.POST("/auth/login", authH.Login)
+		v1.POST("/auth/login", middleware.RateLimitLogin(), authH.Login)
 		v1.POST("/auth/google", authH.Google)
 		v1.POST("/auth/refresh", authH.Refresh)
 		v1.POST("/auth/logout", authH.Logout)
 		v1.POST("/auth/otp/send", authH.SendOTP)
 		v1.POST("/auth/otp/verify", authH.VerifyOTP)
-		v1.POST("/auth/forgot-password/send", authH.SendPasswordResetOTP)
+		v1.POST("/auth/forgot-password/send", middleware.RateLimitForgot(), authH.SendPasswordResetOTP)
 		v1.POST("/auth/forgot-password/reset", authH.ResetPassword)
 
 		// Authenticated
 		authGroup := v1.Group("")
-		authGroup.Use(middleware.Auth(authSvc))
+		authGroup.Use(middleware.Auth(authSvc), middleware.ActiveCheck(authSvc))
 		{
 			authGroup.POST("/presence/heartbeat", presenceH.Heartbeat)
 			authGroup.GET("/auth/me", authH.Me)
-			authGroup.POST("/auth/switch", authH.Switch)
+			authGroup.POST("/auth/switch", middleware.RateLimitSwitch(), authH.Switch)
 
 			authGroup.GET("/categories", catalogH.ListCategories)
 			authGroup.GET("/products", catalogH.ListProducts)
