@@ -33,6 +33,11 @@ type CheckoutItemCmd struct {
 }
 
 func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string, cmd CheckoutCmd) (*model.Trx, error) {
+	// RBAC: transaksi selalu pakai identitas dari JWT (claims), bukan dari payload.
+	// fallbackName = claims.Name (JWT), actingAsCashierID = claims.ActingAsCashierID.
+	// Jika admin tidak switch (actingAs==nil), buat/ambil baris cashiers bernama admin
+	// sebagai pemilik transaksi agar admin tetap bisa checkout tanpa dianggap Kasir lain
+	// (idempotent per store_id+name via GetOrCreateByName). Tidak pernah buat users/KASIR.
 	var cashierID uint
 	cashierName := fallbackName
 

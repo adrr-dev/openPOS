@@ -411,7 +411,8 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode strin
 // GoogleLogin verifies a GIS ID token and returns our own token pair.
 // Existing emails auto-link (password keeps working); new emails get a
 // fresh store + admin, mirroring Register without the OTP gate or password.
-func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName string) (*model.User, *model.TokenPair, error) {
+// Jika akun sudah punya passcode, passcode wajib disertakan (M2 hardening), kalau tidak 401 passcode_required.
+func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName, passcode string) (*model.User, *model.TokenPair, error) {
 	if s.googleClientID == "" {
 		return nil, nil, ErrGoogleNotConfigured
 	}
@@ -441,6 +442,14 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName string
 	if err == nil {
 		if !user.Active {
 			return nil, nil, ErrAccountInactive
+		}
+		if user.PasscodeHash != nil && *user.PasscodeHash != "" {
+			if passcode == "" {
+				return nil, nil, ErrPasscodeRequired
+			}
+			if bcrypt.CompareHashAndPassword([]byte(*user.PasscodeHash), []byte(passcode)) != nil {
+				return nil, nil, ErrPasscodeWrong
+			}
 		}
 		pair, err := s.issueTokens(ctx, user.ID, nil)
 		if err != nil {

@@ -68,6 +68,7 @@ type switchReq struct {
 type googleReq struct {
 	IDToken   string `json:"id_token"`
 	StoreName string `json:"storeName"`
+	Passcode  string `json:"passcode,omitempty"`
 }
 
 type authResponse struct {
@@ -184,7 +185,7 @@ func (h *AuthHandler) Google(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id_token wajib diisi"})
 		return
 	}
-	user, pair, err := h.auth.GoogleLogin(c.Request.Context(), req.IDToken, req.StoreName)
+	user, pair, err := h.auth.GoogleLogin(c.Request.Context(), req.IDToken, req.StoreName, req.Passcode)
 	if err != nil {
 		respondGoogleErr(c, err)
 		return
@@ -255,9 +256,9 @@ func respondSwitchErr(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrSwitchSelf):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Tidak dapat beralih ke akun sendiri."})
 	case errors.Is(err, service.ErrPasscodeRequired):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required", "code": "PASSCODE_REQUIRED"})
 	case errors.Is(err, service.ErrPasscodeWrong):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi."})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi.", "code": "PASSCODE_WRONG"})
 	case errors.Is(err, service.ErrAccountInactive):
 		c.JSON(http.StatusForbidden, gin.H{"error": "Akun dinonaktifkan."})
 	case errors.Is(err, repo.ErrNotFound):
@@ -288,6 +289,10 @@ func respondOTPErr(c *gin.Context, err error) {
 
 func respondGoogleErr(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrPasscodeRequired):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required", "code": "PASSCODE_REQUIRED"})
+	case errors.Is(err, service.ErrPasscodeWrong):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi.", "code": "PASSCODE_WRONG"})
 	case errors.Is(err, service.ErrGoogleInvalid):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "login Google tidak valid"})
 	case errors.Is(err, service.ErrGoogleNotConfigured):
@@ -306,9 +311,9 @@ func respondGoogleErr(c *gin.Context, err error) {
 func respondAuthErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPasscodeRequired):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "passcode_required", "code": "PASSCODE_REQUIRED"})
 	case errors.Is(err, service.ErrPasscodeWrong):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi."})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passcode salah. Coba lagi.", "code": "PASSCODE_WRONG"})
 	case errors.Is(err, service.ErrInvalidCredentials):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau kata sandi tidak cocok. Coba lagi."})
 	case errors.Is(err, service.ErrEmailTaken):
