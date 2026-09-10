@@ -10,10 +10,12 @@ import (
 type TrxService struct {
 	trx      TrxRepository
 	cashiers CashierRepository
+	prods    ProductRepository
+	notif    *NotificationService
 }
 
-func NewTrxService(trx TrxRepository, cashiers CashierRepository) *TrxService {
-	return &TrxService{trx: trx, cashiers: cashiers}
+func NewTrxService(trx TrxRepository, cashiers CashierRepository, prods ProductRepository, notif *NotificationService) *TrxService {
+	return &TrxService{trx: trx, cashiers: cashiers, prods: prods, notif: notif}
 }
 
 type CheckoutCmd struct {
@@ -55,11 +57,19 @@ func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashier
 	for i, it := range cmd.Items {
 		items[i] = repo.CheckoutItem{ProductID: it.ProductID, Qty: it.Qty}
 	}
-	return s.trx.Checkout(ctx, repo.CheckoutInput{
+	resTrx, err := s.trx.Checkout(ctx, repo.CheckoutInput{
 		StoreID: storeID, CashierID: cashierID, CashierName: cashierName,
 		Items: items, Discount: cmd.Discount, Method: cmd.Method,
 		Paid: cmd.Paid, Customer: cmd.Customer,
 	})
+	if err == nil && s.notif != nil && s.prods != nil {
+		for _, it := range cmd.Items {
+			if prod, err := s.prods.GetByID(ctx, storeID, it.ProductID); err == nil && prod != nil {
+				_ = s.notif.CheckAndNotifyLowStock(ctx, storeID, prod.ID, prod.Name, prod.Stock, prod.Unit)
+			}
+		}
+	}
+	return resTrx, err
 }
 
 func (s *TrxService) List(ctx context.Context, storeID, cashierID uint, q, method, date string, page, limit int) ([]*model.Trx, int, error) {

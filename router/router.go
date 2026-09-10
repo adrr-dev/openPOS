@@ -58,11 +58,11 @@ func New(ctx context.Context) (*Server, error) {
 
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour, cfg.GoogleClientID)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
-	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo)
-	trxSvc := service.NewTrxService(trxRepo, cashierRepo)
+	notificationSvc := service.NewNotificationService(notificationRepo)
+	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo, notificationSvc)
+	trxSvc := service.NewTrxService(trxRepo, cashierRepo, productRepo, notificationSvc)
 	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
 	shiftSvc := service.NewShiftService(shiftRepo, cashierRepo, storeRepo)
-	notificationSvc := service.NewNotificationService(notificationRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
 	userH := handler.NewUserHandler(userSvc)

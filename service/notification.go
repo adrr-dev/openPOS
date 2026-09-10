@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/adrr-dev/openPOS/backend/model"
 )
@@ -13,6 +14,7 @@ type NotificationRepository interface {
 	MarkAsRead(ctx context.Context, storeID, id uint) error
 	MarkAllAsRead(ctx context.Context, storeID uint) error
 	Delete(ctx context.Context, storeID, id uint) error
+	HasUnreadForReference(ctx context.Context, storeID uint, referenceID uint, notifType string) (bool, error)
 }
 
 type NotificationService struct {
@@ -65,4 +67,17 @@ func (s *NotificationService) Create(ctx context.Context, storeID uint, title, m
 		ReferenceID: refID,
 	}
 	return s.notifRepo.Create(ctx, n)
+}
+
+func (s *NotificationService) CheckAndNotifyLowStock(ctx context.Context, storeID uint, productID uint, productName string, currentStock int, unit string) error {
+	if currentStock > 5 {
+		return nil
+	}
+	exists, err := s.notifRepo.HasUnreadForReference(ctx, storeID, productID, string(model.NotificationLowStock))
+	if err != nil || exists {
+		return err
+	}
+	title := "Stok Menipis"
+	message := fmt.Sprintf("Produk %s tersisa %d %s.", productName, currentStock, unit)
+	return s.Create(ctx, storeID, title, message, model.NotificationLowStock, &productID)
 }

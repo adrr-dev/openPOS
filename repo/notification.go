@@ -84,3 +84,11 @@ func (r *NotificationRepo) Delete(ctx context.Context, storeID, id uint) error {
 	}
 	return nil
 }
+
+func (r *NotificationRepo) HasUnreadForReference(ctx context.Context, storeID uint, referenceID uint, notifType string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.Notification{}).
+		Where("store_id = ? AND reference_id = ? AND type = ? AND read = ?", storeID, referenceID, notifType, false).
+		Count(&count).Error
+	return count > 0, err
+}

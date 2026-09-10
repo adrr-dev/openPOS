@@ -20,10 +20,11 @@ type CatalogService struct {
 	cats  CategoryRepository
 	prods ProductRepository
 	movs  MovementRepository
+	notif *NotificationService
 }
 
-func NewCatalogService(cats CategoryRepository, prods ProductRepository, movs MovementRepository) *CatalogService {
-	return &CatalogService{cats: cats, prods: prods, movs: movs}
+func NewCatalogService(cats CategoryRepository, prods ProductRepository, movs MovementRepository, notif *NotificationService) *CatalogService {
+	return &CatalogService{cats: cats, prods: prods, movs: movs, notif: notif}
 }
 
 func (s *CatalogService) ListCategories(ctx context.Context, storeID uint) ([]*model.Category, error) {
@@ -209,6 +210,9 @@ func (s *CatalogService) AdjustStock(ctx context.Context, storeID, productID uin
 			return nil, fmt.Errorf("stok tidak boleh negatif")
 		}
 		return nil, err
+	}
+	if p != nil && s.notif != nil {
+		_ = s.notif.CheckAndNotifyLowStock(ctx, storeID, p.ID, p.Name, p.Stock, p.Unit)
 	}
 	return p, nil
 }
