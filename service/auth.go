@@ -534,14 +534,6 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName, passc
 		if !user.Active {
 			return nil, nil, ErrAccountInactive
 		}
-		if user.PasscodeHash != nil && *user.PasscodeHash != "" {
-			if passcode == "" {
-				return nil, nil, ErrPasscodeRequired
-			}
-			if bcrypt.CompareHashAndPassword([]byte(*user.PasscodeHash), []byte(passcode)) != nil {
-				return nil, nil, ErrPasscodeWrong
-			}
-		}
 		pair, err := s.issueTokens(ctx, user.ID, nil)
 		if err != nil {
 			return nil, nil, err
