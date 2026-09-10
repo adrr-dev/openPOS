@@ -137,6 +137,9 @@ type RefreshToken struct {
 	TokenHash string    `gorm:"not null;unique" json:"token_hash"`
 	ExpiresAt time.Time `gorm:"not null" json:"expires_at"`
 	Revoked   bool      `gorm:"not null;default:false" json:"revoked"`
+	// Sesi kasir disimpan eksplisit: refresh wajib mempertahankan identitas
+	// acting-as, kalau tidak sesi kasir berubah jadi admin tiap refresh.
+	ActingAsCashierID *uint `gorm:"index" json:"-"`
 }
 
 func (RefreshToken) TableName() string {

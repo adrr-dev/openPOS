@@ -15,12 +15,13 @@ type RefreshRepo struct {
 
 func NewRefreshRepo(db *gorm.DB) *RefreshRepo { return &RefreshRepo{db: db} }
 
-func (r *RefreshRepo) Create(ctx context.Context, userID uint, tokenHash string, expiresAt time.Time) error {
+func (r *RefreshRepo) Create(ctx context.Context, userID uint, actingAsCashierID *uint, tokenHash string, expiresAt time.Time) error {
 	rt := model.RefreshToken{
-		UserID:    userID,
-		TokenHash: tokenHash,
-		ExpiresAt: expiresAt,
-		Revoked:   false,
+		UserID:            userID,
+		ActingAsCashierID: actingAsCashierID,
+		TokenHash:         tokenHash,
+		ExpiresAt:         expiresAt,
+		Revoked:           false,
 	}
 	return r.db.WithContext(ctx).Create(&rt).Error
 }

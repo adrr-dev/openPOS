@@ -194,12 +194,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token wajib diisi"})
 		return
 	}
-	user, pair, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
+	pubUser, pair, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, authResponse{User: user.Public(), TokenPair: *pair})
+	c.JSON(http.StatusOK, authResponse{User: *pubUser, TokenPair: *pair})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {

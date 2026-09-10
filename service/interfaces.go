@@ -32,7 +32,7 @@ type CashierRepository interface {
 }
 
 type RefreshRepository interface {
-	Create(ctx context.Context, userID uint, tokenHash string, expiresAt time.Time) error
+	Create(ctx context.Context, userID uint, actingAsCashierID *uint, tokenHash string, expiresAt time.Time) error
 	GetActiveByHash(ctx context.Context, tokenHash string) (*model.RefreshToken, error)
 	Revoke(ctx context.Context, tokenHash string) error
 	RevokeAllForUser(ctx context.Context, userID uint) error

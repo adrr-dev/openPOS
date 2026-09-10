@@ -523,26 +523,39 @@ func (s *AuthService) Me(ctx context.Context, claims *Claims) (*model.PublicUser
 	return &pub, nil
 }
 
-func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.User, *model.TokenPair, error) {
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.PublicUser, *model.TokenPair, error) {
 	hash := hashToken(refreshToken)
 	rt, err := s.refresh.GetActiveByHash(ctx, hash)
 	if err != nil || rt.Revoked || time.Now().After(rt.ExpiresAt) {
 		return nil, nil, ErrTokenInvalid
 	}
 
-	user, err := s.users.GetByID(ctx, rt.UserID)
-	if err != nil || !user.Active {
+	owner, err := s.users.GetByID(ctx, rt.UserID)
+	if err != nil || !owner.Active {
 		return nil, nil, ErrTokenInvalid
+	}
+
+	// Konteks sesi wajib bertahan lintas refresh: kasir tetap kasir,
+	// admin tetap admin. Tanpa ini sesi kasir berubah jadi admin.
+	var pub model.PublicUser
+	if rt.ActingAsCashierID != nil {
+		c, err := s.cashiers.GetByID(ctx, *rt.ActingAsCashierID)
+		if err != nil || !c.Active || c.StoreID != owner.StoreID {
+			return nil, nil, ErrTokenInvalid
+		}
+		pub = c.Public(owner.StoreName)
+	} else {
+		pub = owner.Public()
 	}
 
 	if err := s.refresh.Revoke(ctx, hash); err != nil {
 		return nil, nil, err
 	}
-	pair, err := s.issueTokens(ctx, user.ID, nil)
+	pair, err := s.issueTokens(ctx, owner.ID, rt.ActingAsCashierID)
 	if err != nil {
 		return nil, nil, err
 	}
-	return user, pair, nil
+	return &pub, pair, nil
 }
 
 func (s *AuthService) RecordHeartbeat(ctx context.Context, claims *Claims, now time.Time) error {
@@ -556,11 +569,16 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string, claims ..
 	if refreshToken != "" {
 		hash := hashToken(refreshToken)
 		if rt, err := s.refresh.GetActiveByHash(ctx, hash); err == nil && !rt.Revoked && !time.Now().After(rt.ExpiresAt) {
-			_ = s.users.UpdateLastSeenAt(ctx, rt.UserID, nil)
+			// Tandai entity sesi yang benar offline (kasir vs owner).
+			if rt.ActingAsCashierID != nil {
+				_ = s.cashiers.UpdateLastSeenAt(ctx, *rt.ActingAsCashierID, nil)
+			} else {
+				_ = s.users.UpdateLastSeenAt(ctx, rt.UserID, nil)
+			}
 		}
 		_ = s.refresh.Revoke(ctx, hash)
 	}
-	// If caller is acting as cashier, mark cashier offline immediately (heartbeat entity).
+	// Fallback via Authorization header (frontend baru kirim header tanpa body) — gabungan dengan rt di atas.
 	if len(claims) > 0 && claims[0] != nil && claims[0].ActingAsCashierID != nil {
 		_ = s.cashiers.UpdateLastSeenAt(ctx, *claims[0].ActingAsCashierID, nil)
 	} else if len(claims) > 0 && claims[0] != nil {
@@ -763,7 +781,7 @@ func (s *AuthService) issueTokens(ctx context.Context, ownerID uint, actingAsCas
 	}
 	refresh := hex.EncodeToString(raw)
 
-	if err := s.refresh.Create(ctx, owner.ID, hashToken(refresh), now.Add(s.refreshTTL)); err != nil {
+	if err := s.refresh.Create(ctx, owner.ID, actingAsCashierID, hashToken(refresh), now.Add(s.refreshTTL)); err != nil {
 		return nil, err
 	}
 
