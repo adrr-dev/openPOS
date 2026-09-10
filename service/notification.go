@@ -9,12 +9,13 @@ import (
 
 type NotificationRepository interface {
 	Create(ctx context.Context, n *model.Notification) error
-	List(ctx context.Context, storeID uint, page, limit int, unreadOnly bool) ([]*model.Notification, int, error)
+	List(ctx context.Context, storeID uint, category string, status string, unreadOnly bool, page, limit int) ([]*model.Notification, int, error)
+	UnreadCount(ctx context.Context, storeID uint) (int64, error)
 	GetByID(ctx context.Context, storeID, id uint) (*model.Notification, error)
 	MarkAsRead(ctx context.Context, storeID, id uint) error
 	MarkAllAsRead(ctx context.Context, storeID uint) error
 	Delete(ctx context.Context, storeID, id uint) error
-	HasUnreadForReference(ctx context.Context, storeID uint, referenceID uint, notifType string) (bool, error)
+	HasUnreadForReference(ctx context.Context, storeID uint, referenceID string, notifType string) (bool, error)
 }
 
 type NotificationService struct {
@@ -32,8 +33,8 @@ type NotificationPage struct {
 	Limit int                   `json:"limit"`
 }
 
-func (s *NotificationService) List(ctx context.Context, storeID uint, page, limit int, unreadOnly bool) (*NotificationPage, error) {
-	items, total, err := s.notifRepo.List(ctx, storeID, page, limit, unreadOnly)
+func (s *NotificationService) List(ctx context.Context, storeID uint, category, status string, unreadOnly bool, page, limit int) (*NotificationPage, error) {
+	items, total, err := s.notifRepo.List(ctx, storeID, category, status, unreadOnly, page, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +44,10 @@ func (s *NotificationService) List(ctx context.Context, storeID uint, page, limi
 		Page:  page,
 		Limit: limit,
 	}, nil
+}
+
+func (s *NotificationService) UnreadCount(ctx context.Context, storeID uint) (int64, error) {
+	return s.notifRepo.UnreadCount(ctx, storeID)
 }
 
 func (s *NotificationService) MarkAsRead(ctx context.Context, storeID, id uint) error {
@@ -57,14 +62,18 @@ func (s *NotificationService) Delete(ctx context.Context, storeID, id uint) erro
 	return s.notifRepo.Delete(ctx, storeID, id)
 }
 
-func (s *NotificationService) Create(ctx context.Context, storeID uint, title, message string, notifType model.NotificationType, refID *uint) error {
+func (s *NotificationService) Emit(ctx context.Context, storeID uint, title, message string, category model.NotificationCategory, notifType string, actorID, actorName, refType, refID string) error {
 	n := &model.Notification{
-		StoreID:     storeID,
-		Title:       title,
-		Message:     message,
-		Type:        notifType,
-		Read:        false,
-		ReferenceID: refID,
+		StoreID:       storeID,
+		Title:         title,
+		Message:       message,
+		Category:      category,
+		Type:          notifType,
+		ActorID:       actorID,
+		ActorName:     actorName,
+		ReferenceType: refType,
+		ReferenceID:   refID,
+		Read:          false,
 	}
 	return s.notifRepo.Create(ctx, n)
 }
@@ -73,11 +82,20 @@ func (s *NotificationService) CheckAndNotifyLowStock(ctx context.Context, storeI
 	if currentStock > 5 {
 		return nil
 	}
-	exists, err := s.notifRepo.HasUnreadForReference(ctx, storeID, productID, string(model.NotificationLowStock))
+	refIDStr := fmt.Sprintf("%d", productID)
+	notifType := "low_stock"
+	if currentStock == 0 {
+		notifType = "out_of_stock"
+	}
+	exists, err := s.notifRepo.HasUnreadForReference(ctx, storeID, refIDStr, notifType)
 	if err != nil || exists {
 		return err
 	}
-	title := "Stok Menipis"
+	title := "Stok menipis"
 	message := fmt.Sprintf("Produk %s tersisa %d %s.", productName, currentStock, unit)
-	return s.Create(ctx, storeID, title, message, model.NotificationLowStock, &productID)
+	if currentStock == 0 {
+		title = "Stok habis"
+		message = fmt.Sprintf("Produk %s habis (0 %s).", productName, unit)
+	}
+	return s.Emit(ctx, storeID, title, message, model.CategoryStok, notifType, "", "", "product", refIDStr)
 }

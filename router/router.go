@@ -128,8 +128,9 @@ func New(ctx context.Context) (*Server, error) {
 			authGroup.POST("/cashier/shift/start", shiftH.StartShift)
 			authGroup.POST("/cashier/shift/close", shiftH.CloseShift)
 			authGroup.GET("/notifications", notificationH.List)
-			authGroup.PATCH("/notifications/:id/read", notificationH.MarkAsRead)
+			authGroup.GET("/notifications/unread-count", notificationH.UnreadCount)
 			authGroup.PATCH("/notifications/read-all", notificationH.MarkAllAsRead)
+			authGroup.PATCH("/notifications/:id/read", notificationH.MarkAsRead)
 			authGroup.DELETE("/notifications/:id", notificationH.Delete)
 
 			// Admin only

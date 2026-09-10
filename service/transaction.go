@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/adrr-dev/openPOS/backend/model"
 	"github.com/adrr-dev/openPOS/backend/repo"
@@ -62,10 +63,18 @@ func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashier
 		Items: items, Discount: cmd.Discount, Method: cmd.Method,
 		Paid: cmd.Paid, Customer: cmd.Customer,
 	})
-	if err == nil && s.notif != nil && s.prods != nil {
-		for _, it := range cmd.Items {
-			if prod, err := s.prods.GetByID(ctx, storeID, it.ProductID); err == nil && prod != nil {
-				_ = s.notif.CheckAndNotifyLowStock(ctx, storeID, prod.ID, prod.Name, prod.Stock, prod.Unit)
+	if err == nil && s.notif != nil {
+		actorIDStr := fmt.Sprintf("%d", cashierID)
+		refIDStr := fmt.Sprintf("%d", resTrx.ID)
+		title := "Transaksi baru"
+		message := fmt.Sprintf("Rp%d · %s", resTrx.Total, resTrx.Method)
+		_ = s.notif.Emit(ctx, storeID, title, message, model.CategoryTransaksi, "transaction_created", actorIDStr, cashierName, "transaction", refIDStr)
+
+		if s.prods != nil {
+			for _, it := range cmd.Items {
+				if prod, err := s.prods.GetByID(ctx, storeID, it.ProductID); err == nil && prod != nil {
+					_ = s.notif.CheckAndNotifyLowStock(ctx, storeID, prod.ID, prod.Name, prod.Stock, prod.Unit)
+				}
 			}
 		}
 	}
@@ -81,5 +90,12 @@ func (s *TrxService) Get(ctx context.Context, storeID, id uint) (*model.Trx, err
 }
 
 func (s *TrxService) Refund(ctx context.Context, storeID, trxID uint, items map[uint]int, reason, byName string) (*model.Trx, error) {
-	return s.trx.Refund(ctx, storeID, trxID, items, reason, byName)
+	trx, err := s.trx.Refund(ctx, storeID, trxID, items, reason, byName)
+	if err == nil && s.notif != nil {
+		refIDStr := fmt.Sprintf("%d", trxID)
+		title := "Refund"
+		message := fmt.Sprintf("Invoice #TRX-%05d oleh %s", trxID, byName)
+		_ = s.notif.Emit(ctx, storeID, title, message, model.CategoryTransaksi, "refund_created", "", byName, "transaction", refIDStr)
+	}
+	return trx, err
 }

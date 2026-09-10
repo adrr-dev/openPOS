@@ -65,12 +65,13 @@ func TestNotificationEndpoints(t *testing.T) {
 		"password":  "password123",
 	}, "")
 
-	token, ok := regResp["access_token"].(string)
-	if !ok || token == "" {
+	adminTok, ok := regResp["access_token"].(string)
+	if !ok || adminTok == "" {
 		t.Fatalf("failed to register user for token: %v", regResp)
 	}
 
-	w, body := doReq("GET", "/notifications", nil, token)
+	// Test GET /notifications
+	w, body := doReq("GET", "/notifications", nil, adminTok)
 	if w.Code != 200 {
 		t.Fatalf("GET /notifications failed: %d body=%s", w.Code, w.Body.String())
 	}
@@ -80,5 +81,43 @@ func TestNotificationEndpoints(t *testing.T) {
 		t.Fatalf("expected total 0 notifications, got %v", body["total"])
 	}
 
-	t.Log("Notification endpoints test passed successfully.")
+	// Test GET /notifications/unread-count
+	w, bodyCount := doReq("GET", "/notifications/unread-count", nil, adminTok)
+	if w.Code != 200 {
+		t.Fatalf("GET /notifications/unread-count failed: %d", w.Code)
+	}
+	if bodyCount["total"].(float64) != 0 {
+		t.Fatalf("expected unread count 0, got %v", bodyCount["total"])
+	}
+
+	// Create a cashier account to test 403 Forbidden for cashiers
+	_, cashierResp := doReq("POST", "/users", map[string]any{
+		"name":     "Kasir Test",
+		"email":    "kasir_" + email,
+		"password": "password123",
+		"role":     "cashier",
+	}, adminTok)
+
+	cashierUser, ok := cashierResp["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("failed to create cashier: %v", cashierResp)
+	}
+	cashierID := uint(cashierUser["id"].(float64))
+
+	// Switch/login as cashier
+	_, switchResp := doReq("POST", "/auth/switch", map[string]any{
+		"target_user_id": cashierID,
+	}, adminTok)
+	cashierTok, ok := switchResp["access_token"].(string)
+	if !ok || cashierTok == "" {
+		t.Fatalf("failed to switch to cashier: %v", switchResp)
+	}
+
+	// Cashier accessing notifications should get 403 Forbidden
+	wCashier, _ := doReq("GET", "/notifications", nil, cashierTok)
+	if wCashier.Code != 403 {
+		t.Fatalf("expected 403 Forbidden for cashier accessing /notifications, got %d", wCashier.Code)
+	}
+
+	t.Log("Notification endpoints tests passed successfully.")
 }

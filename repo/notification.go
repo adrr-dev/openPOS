@@ -17,23 +17,48 @@ func NewNotificationRepo(db *gorm.DB) *NotificationRepo {
 }
 
 func (r *NotificationRepo) Create(ctx context.Context, n *model.Notification) error {
-	return r.db.WithContext(ctx).Create(n).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(n).Error; err != nil {
+			return err
+		}
+		// Retention: max 10 latest per store_id and type (FIFO)
+		var oldIDs []uint
+		err := tx.Model(&model.Notification{}).
+			Where("store_id = ? AND type = ?", n.StoreID, n.Type).
+			Order("created_at ASC, id ASC").
+			Pluck("id", &oldIDs).Error
+		if err != nil {
+			return err
+		}
+		if len(oldIDs) > 10 {
+			excess := oldIDs[:len(oldIDs)-10]
+			if err := tx.Where("id IN ?", excess).Unscoped().Delete(&model.Notification{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-func (r *NotificationRepo) List(ctx context.Context, storeID uint, page, limit int, unreadOnly bool) ([]*model.Notification, int, error) {
+func (r *NotificationRepo) List(ctx context.Context, storeID uint, category string, status string, unreadOnly bool, page, limit int) ([]*model.Notification, int, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 {
-		limit = 20
+		limit = 10
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 200 {
+		limit = 200
 	}
 
 	query := r.db.WithContext(ctx).Model(&model.Notification{}).Where("store_id = ?", storeID)
-	if unreadOnly {
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	if status == "unread" || unreadOnly {
 		query = query.Where("read = ?", false)
+	} else if status == "read" {
+		query = query.Where("read = ?", true)
 	}
 
 	var total int64
@@ -49,6 +74,12 @@ func (r *NotificationRepo) List(ctx context.Context, storeID uint, page, limit i
 	}
 
 	return items, int(total), nil
+}
+
+func (r *NotificationRepo) UnreadCount(ctx context.Context, storeID uint) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Model(&model.Notification{}).Where("store_id = ? AND read = ?", storeID, false).Count(&total).Error
+	return total, err
 }
 
 func (r *NotificationRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Notification, error) {
@@ -85,7 +116,7 @@ func (r *NotificationRepo) Delete(ctx context.Context, storeID, id uint) error {
 	return nil
 }
 
-func (r *NotificationRepo) HasUnreadForReference(ctx context.Context, storeID uint, referenceID uint, notifType string) (bool, error) {
+func (r *NotificationRepo) HasUnreadForReference(ctx context.Context, storeID uint, referenceID string, notifType string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Notification{}).
 		Where("store_id = ? AND reference_id = ? AND type = ? AND read = ?", storeID, referenceID, notifType, false).
