@@ -94,3 +94,9 @@ func RateLimitForgot() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func ResetRateLimiters() {
+	limiterMu.Lock()
+	defer limiterMu.Unlock()
+	limiters = map[string]*windowCounter{}
+}

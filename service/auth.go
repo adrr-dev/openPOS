@@ -39,6 +39,7 @@ var (
 	ErrEmailNotVerified    = errors.New("Email belum diverifikasi. Silakan verifikasi kode OTP terlebih dahulu.")
 	ErrGoogleInvalid       = errors.New("login Google tidak valid")
 	ErrGoogleNotConfigured = errors.New("login Google belum dikonfigurasi di server")
+	ErrOTPRequired         = errors.New("otp_required")
 )
 
 var TestOnOTPSent func(email, code string)
@@ -117,6 +118,38 @@ func (s *AuthService) SendOTP(ctx context.Context, email string) error {
 		return err
 	}
 
+	return nil
+}
+
+func (s *AuthService) SendLoginOTP(ctx context.Context, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !isEmail(email) {
+		return ErrInvalidEmail
+	}
+	existing, err := s.otps.GetOTP(ctx, email)
+	if err == nil && existing != nil {
+		if time.Since(existing.LastSentAt) < 60*time.Second {
+			return ErrOtpCooldown
+		}
+	}
+	code, err := generate6DigitOTP()
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Now().Add(10 * time.Minute)
+	if err := s.otps.UpsertOTP(ctx, email, string(hash), expiresAt); err != nil {
+		return err
+	}
+	if TestOnOTPSent != nil {
+		TestOnOTPSent(email, code)
+	}
+	if err := sendOTPEmail(email, code); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -406,7 +439,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 	return user, pair, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, email, password, passcode string) (*model.User, *model.TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, email, password, passcode, otp string) (*model.User, *model.TokenPair, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 
 	user, err := s.users.GetByEmail(ctx, email)
@@ -423,11 +456,36 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode strin
 		return nil, nil, ErrInvalidCredentials
 	}
 	if user.PasscodeHash != nil && *user.PasscodeHash != "" {
-		if passcode == "" {
-			return nil, nil, ErrPasscodeRequired
-		}
-		if bcrypt.CompareHashAndPassword([]byte(*user.PasscodeHash), []byte(passcode)) != nil {
-			return nil, nil, ErrPasscodeWrong
+		otp = strings.TrimSpace(otp)
+		passcode = strings.TrimSpace(passcode)
+		if passcode != "" {
+			if bcrypt.CompareHashAndPassword([]byte(*user.PasscodeHash), []byte(passcode)) != nil {
+				return nil, nil, ErrPasscodeWrong
+			}
+		} else if otp != "" {
+			o, err := s.otps.GetOTP(ctx, email)
+			if err != nil {
+				if errors.Is(err, repo.ErrNotFound) {
+					return nil, nil, ErrOtpWrong
+				}
+				return nil, nil, err
+			}
+			if o.Attempts >= 3 {
+				return nil, nil, ErrOtpMaxAttempts
+			}
+			if time.Now().After(o.ExpiresAt) {
+				return nil, nil, ErrOtpExpired
+			}
+			if bcrypt.CompareHashAndPassword([]byte(o.CodeHash), []byte(otp)) != nil {
+				attempts, _ := s.otps.IncrementAttempts(ctx, email)
+				if attempts >= 3 {
+					return nil, nil, ErrOtpMaxAttempts
+				}
+				return nil, nil, ErrOtpWrong
+			}
+			_ = s.otps.RevokeOTP(ctx, email)
+		} else {
+			return nil, nil, ErrOTPRequired
 		}
 	}
 

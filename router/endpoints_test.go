@@ -127,10 +127,10 @@ func TestAllEndpoints(t *testing.T) {
 	w, _ = doReq("PUT", fmt.Sprintf("/users/%d/passcode", num(adminUser, "id")), map[string]string{"passcode": "54321"}, adminTok)
 	expect("set owner passcode -> 200", w, 200)
 	w, _ = doReq("POST", "/auth/login", map[string]string{"email": email, "password": "password123"}, "")
-	if w.Code != 401 || !strings.Contains(w.Body.String(), "passcode_required") {
-		t.Fatalf("login without passcode: want 401 passcode_required, got %d %s", w.Code, w.Body.String())
+	if w.Code != 401 || (!strings.Contains(w.Body.String(), "otp_required") && !strings.Contains(w.Body.String(), "passcode_required")) {
+		t.Fatalf("login without passcode/otp: want 401 otp_required (or legacy passcode_required), got %d %s", w.Code, w.Body.String())
 	}
-	t.Log("ok login without passcode -> 401 passcode_required")
+	t.Log("ok login without passcode/otp -> 401 otp_required")
 	w, _ = doReq("POST", "/auth/login", map[string]string{"email": email, "password": "password123", "passcode": "00000"}, "")
 	expect("login wrong passcode -> 401", w, 401)
 	w, resp = doReq("POST", "/auth/login", map[string]string{"email": email, "password": "password123", "passcode": "54321"}, "")
