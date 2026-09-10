@@ -49,9 +49,10 @@ type User struct {
 	PasswordHash    string     `gorm:"not null" json:"-"`
 	PasscodeHash    *string    `json:"-"`
 	Role            Role       `gorm:"not null;default:'cashier'" json:"role"`
-	Active          bool       `gorm:"not null;default:true" json:"active"`
-	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
-	StoreName       string     `gorm:"-" json:"store_name,omitempty"`
+	Active          bool        `gorm:"not null;default:true" json:"active"`
+	LastSeenAt      *time.Time  `gorm:"index" json:"last_seen_at,omitempty"`
+	EmailVerifiedAt *time.Time  `json:"email_verified_at,omitempty"`
+	StoreName       string      `gorm:"-" json:"store_name,omitempty"`
 }
 
 func (User) TableName() string {
@@ -60,10 +61,11 @@ func (User) TableName() string {
 
 type Cashier struct {
 	Model
-	StoreID      uint    `gorm:"not null;index" json:"store_id"`
-	Name         string  `gorm:"not null" json:"name"`
-	PasscodeHash *string `json:"-"`
-	Active       bool    `gorm:"not null;default:true" json:"active"`
+	StoreID      uint       `gorm:"not null;index" json:"store_id"`
+	Name         string     `gorm:"not null" json:"name"`
+	PasscodeHash *string    `json:"-"`
+	Active       bool       `gorm:"not null;default:true" json:"active"`
+	LastSeenAt   *time.Time `gorm:"index" json:"last_seen_at,omitempty"`
 }
 
 func (Cashier) TableName() string {
@@ -71,12 +73,18 @@ func (Cashier) TableName() string {
 }
 
 func (c *Cashier) Public(storeName string) PublicUser {
+	online := false
+	if c.LastSeenAt != nil {
+		online = time.Since(*c.LastSeenAt) < 90*time.Second
+	}
 	return PublicUser{
 		ID:           c.ID,
 		Email:        "",
 		Name:         c.Name,
 		Role:         RoleCashier,
 		Active:       c.Active,
+		Online:       online,
+		LastSeenAt:   c.LastSeenAt,
 		StoreID:      c.StoreID,
 		StoreName:    storeName,
 		CreatedAt:    c.CreatedAt,
@@ -90,6 +98,8 @@ type PublicUser struct {
 	Name        string    `json:"name"`
 	Role        Role      `json:"role"`
 	Active      bool      `json:"active"`
+	Online      bool      `json:"online"`
+	LastSeenAt  *time.Time `json:"last_seen_at,omitempty"`
 	StoreID     uint      `json:"store_id"`
 	StoreName   string    `json:"store_name,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`
@@ -97,12 +107,18 @@ type PublicUser struct {
 }
 
 func (u *User) Public() PublicUser {
+	online := false
+	if u.LastSeenAt != nil {
+		online = time.Since(*u.LastSeenAt) < 90*time.Second
+	}
 	return PublicUser{
 		ID:          u.ID,
 		Email:       u.Email,
 		Name:        u.Name,
 		Role:        u.Role,
 		Active:      u.Active,
+		Online:      online,
+		LastSeenAt:  u.LastSeenAt,
 		StoreID:     u.StoreID,
 		StoreName:   u.StoreName,
 		CreatedAt:   u.CreatedAt,

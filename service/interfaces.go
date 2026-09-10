@@ -16,6 +16,7 @@ type UserRepository interface {
 	SetPasscode(ctx context.Context, id uint, hash *string) error
 	RegisterTx(ctx context.Context, storeName, email, name, passwordHash string) (*model.User, error)
 	UpdatePassword(ctx context.Context, email string, passwordHash string) error
+	UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt *time.Time) error
 }
 
 type CashierRepository interface {
@@ -26,6 +27,7 @@ type CashierRepository interface {
 	SetPasscode(ctx context.Context, id uint, hash *string) error
 	GetOrCreateByName(ctx context.Context, storeID uint, name string) (uint, error)
 	Delete(ctx context.Context, id uint) error
+	UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt *time.Time) error
 }
 
 type RefreshRepository interface {

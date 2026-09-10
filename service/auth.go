@@ -364,6 +364,9 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 	if err != nil {
 		return nil, nil, err
 	}
+	now := time.Now().UTC()
+	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now)
+	user.LastSeenAt = &now
 	return user, pair, nil
 }
 
@@ -396,6 +399,9 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode strin
 	if err != nil {
 		return nil, nil, err
 	}
+	now2 := time.Now().UTC()
+	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now2)
+	user.LastSeenAt = &now2
 	return user, pair, nil
 }
 
@@ -437,6 +443,9 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName string
 		if err != nil {
 			return nil, nil, err
 		}
+		now := time.Now().UTC()
+		_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now)
+		user.LastSeenAt = &now
 		return user, pair, nil
 	} else if !errors.Is(err, repo.ErrNotFound) {
 		return nil, nil, err
@@ -460,6 +469,9 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName string
 	if err != nil {
 		return nil, nil, err
 	}
+	now2 := time.Now().UTC()
+	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now2)
+	user.LastSeenAt = &now2
 	return user, pair, nil
 }
 
@@ -533,11 +545,27 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.
 	return user, pair, nil
 }
 
-func (s *AuthService) Logout(ctx context.Context, refreshToken string) {
-	if refreshToken == "" {
-		return
+func (s *AuthService) RecordHeartbeat(ctx context.Context, claims *Claims, now time.Time) error {
+	if claims.ActingAsCashierID != nil {
+		return s.cashiers.UpdateLastSeenAt(ctx, *claims.ActingAsCashierID, &now)
 	}
-	_ = s.refresh.Revoke(ctx, hashToken(refreshToken))
+	return s.users.UpdateLastSeenAt(ctx, claims.UserID, &now)
+}
+
+func (s *AuthService) Logout(ctx context.Context, refreshToken string, claims ...*Claims) {
+	if refreshToken != "" {
+		hash := hashToken(refreshToken)
+		if rt, err := s.refresh.GetActiveByHash(ctx, hash); err == nil && !rt.Revoked && !time.Now().After(rt.ExpiresAt) {
+			_ = s.users.UpdateLastSeenAt(ctx, rt.UserID, nil)
+		}
+		_ = s.refresh.Revoke(ctx, hash)
+	}
+	// If caller is acting as cashier, mark cashier offline immediately (heartbeat entity).
+	if len(claims) > 0 && claims[0] != nil && claims[0].ActingAsCashierID != nil {
+		_ = s.cashiers.UpdateLastSeenAt(ctx, *claims[0].ActingAsCashierID, nil)
+	} else if len(claims) > 0 && claims[0] != nil {
+		_ = s.users.UpdateLastSeenAt(ctx, claims[0].UserID, nil)
+	}
 }
 
 func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint, passcode string, roleHint ...string) (*model.PublicUser, *model.TokenPair, error) {
@@ -549,6 +577,15 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 	hint := ""
 	if len(roleHint) > 0 {
 		hint = roleHint[0]
+	}
+
+	now := time.Now().UTC()
+	offlineCurrent := func() {
+		if claims.ActingAsCashierID != nil {
+			_ = s.cashiers.UpdateLastSeenAt(ctx, *claims.ActingAsCashierID, nil)
+		} else {
+			_ = s.users.UpdateLastSeenAt(ctx, claims.UserID, nil)
+		}
 	}
 
 	if hint == "cashier" {
@@ -566,6 +603,9 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 			if err != nil {
 				return nil, nil, err
 			}
+			offlineCurrent()
+			_ = s.cashiers.UpdateLastSeenAt(ctx, c.ID, &now)
+			c.LastSeenAt = &now
 			pub := c.Public(owner.StoreName)
 			return &pub, pair, nil
 		}
@@ -573,7 +613,18 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 	}
 
 	if hint == "admin" {
-		return s.switchToOwner(ctx, owner, passcode)
+		if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
+			return nil, nil, err
+		}
+		pair, err := s.issueTokens(ctx, owner.ID, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		offlineCurrent()
+		_ = s.users.UpdateLastSeenAt(ctx, owner.ID, &now)
+		owner.LastSeenAt = &now
+		pub := owner.Public()
+		return &pub, pair, nil
 	}
 
 	// Default: check cashier first, then owner
@@ -591,12 +642,26 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		if err != nil {
 			return nil, nil, err
 		}
+		offlineCurrent()
+		_ = s.cashiers.UpdateLastSeenAt(ctx, c.ID, &now)
+		c.LastSeenAt = &now
 		pub := c.Public(owner.StoreName)
 		return &pub, pair, nil
 	}
 
 	if targetID == owner.ID {
-		return s.switchToOwner(ctx, owner, passcode)
+		if err := checkPasscode(owner.PasscodeHash, passcode); err != nil {
+			return nil, nil, err
+		}
+		pair, err := s.issueTokens(ctx, owner.ID, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		offlineCurrent()
+		_ = s.users.UpdateLastSeenAt(ctx, owner.ID, &now)
+		owner.LastSeenAt = &now
+		pub := owner.Public()
+		return &pub, pair, nil
 	}
 
 	return nil, nil, repo.ErrNotFound
@@ -610,6 +675,9 @@ func (s *AuthService) switchToOwner(ctx context.Context, owner *model.User, pass
 	if err != nil {
 		return nil, nil, err
 	}
+	now := time.Now().UTC()
+	_ = s.users.UpdateLastSeenAt(ctx, owner.ID, &now)
+	owner.LastSeenAt = &now
 	pub := owner.Public()
 	return &pub, pair, nil
 }

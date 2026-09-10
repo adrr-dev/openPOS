@@ -72,6 +72,7 @@ func New(ctx context.Context) (*Server, error) {
 	settingsH := handler.NewSettingsHandler(settingsSvc)
 	shiftH := handler.NewShiftHandler(shiftSvc)
 	notificationH := handler.NewNotificationHandler(notificationSvc)
+	presenceH := handler.NewPresenceHandler(authSvc)
 	healthH := handler.NewHealthHandler(database)
 
 	r := gin.New()
@@ -113,6 +114,7 @@ func New(ctx context.Context) (*Server, error) {
 		authGroup := v1.Group("")
 		authGroup.Use(middleware.Auth(authSvc))
 		{
+			authGroup.POST("/presence/heartbeat", presenceH.Heartbeat)
 			authGroup.GET("/auth/me", authH.Me)
 			authGroup.POST("/auth/switch", authH.Switch)
 

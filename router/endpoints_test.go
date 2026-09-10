@@ -223,6 +223,24 @@ func TestAllEndpoints(t *testing.T) {
 	}
 
 	// ── 17. active toggle ──────────────────────────────────────
+	// ── 17. presence heartbeat ─────────────────────────────────
+	w, resp = doReq("POST", "/presence/heartbeat", nil, adminTok)
+	expect("heartbeat -> 200", w, 200)
+	if resp["status"] != "ok" {
+		t.Fatalf("heartbeat status: %v", resp)
+	}
+
+	w, resp = doReq("GET", "/users", nil, adminTok)
+	expect("get users -> 200", w, 200)
+	usersList := resp["users"].([]any)
+	if len(usersList) == 0 {
+		t.Fatalf("users list empty")
+	}
+	u0 := usersList[0].(map[string]any)
+	if u0["online"] != true || u0["last_seen_at"] == nil {
+		t.Fatalf("expected admin user online after heartbeat, got: %v", u0)
+	}
+
 	w, _ = doReq("PATCH", fmt.Sprintf("/users/%d/active", cashier2), map[string]bool{"active": false}, adminTok)
 	expect("deactivate -> 200", w, 200)
 	w, _ = doReq("POST", "/auth/switch", map[string]any{"target_user_id": cashier2}, adminTok)

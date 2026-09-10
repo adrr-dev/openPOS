@@ -125,3 +125,14 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, email string, passwordHas
 	}
 	return nil
 }
+
+func (r *UserRepo) UpdateLastSeenAt(ctx context.Context, userID uint, lastSeenAt *time.Time) error {
+	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).Update("last_seen_at", lastSeenAt)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

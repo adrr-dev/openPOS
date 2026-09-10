@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -82,6 +83,17 @@ func (r *CashierRepo) GetOrCreateByName(ctx context.Context, storeID uint, name 
 
 func (r *CashierRepo) Delete(ctx context.Context, id uint) error {
 	res := r.db.WithContext(ctx).Delete(&model.Cashier{}, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *CashierRepo) UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt *time.Time) error {
+	res := r.db.WithContext(ctx).Model(&model.Cashier{}).Where("id = ?", id).Update("last_seen_at", lastSeenAt)
 	if res.Error != nil {
 		return res.Error
 	}

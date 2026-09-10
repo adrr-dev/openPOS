@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -204,7 +205,15 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req logoutReq
 	_ = c.ShouldBindJSON(&req)
-	h.auth.Logout(c.Request.Context(), req.RefreshToken)
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		if authHeader := c.GetHeader("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			if parsed, err := h.auth.ParseAccess(strings.TrimPrefix(authHeader, "Bearer ")); err == nil {
+				claims = parsed
+			}
+		}
+	}
+	h.auth.Logout(c.Request.Context(), req.RefreshToken, claims)
 	c.JSON(http.StatusOK, gin.H{"message": "keluar berhasil"})
 }
 
