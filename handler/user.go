@@ -24,6 +24,10 @@ type setActiveReq struct {
 	Active bool `json:"active"`
 }
 
+type renameUserReq struct {
+	Name string `json:"name"`
+}
+
 func (h *UserHandler) List(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	users, err := h.svc.List(c.Request.Context(), claims.StoreID)
@@ -84,6 +88,24 @@ func (h *UserHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Akun kasir berhasil dihapus."})
 }
 
+func (h *UserHandler) Rename(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	id, ok := pathUint(c, "id")
+	if !ok {
+		return
+	}
+	var req renameUserReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
+		return
+	}
+	if err := h.svc.Rename(c.Request.Context(), claims.StoreID, id, req.Name); err != nil {
+		respondUserErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Nama kasir diperbarui."})
+}
+
 func respondUserErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrEmailTaken):
@@ -92,6 +114,8 @@ func respondUserErr(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Akun tidak ditemukan di toko Anda."})
 	case errors.Is(err, service.ErrNotEditable):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Hanya akun kasir yang dapat dinonaktifkan."})
+	case errors.Is(err, service.ErrNotRenamable):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Hanya akun kasir yang dapat diubah."})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}

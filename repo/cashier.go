@@ -102,3 +102,14 @@ func (r *CashierRepo) UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt 
 	}
 	return nil
 }
+
+func (r *CashierRepo) UpdateName(ctx context.Context, id uint, name string) error {
+	res := r.db.WithContext(ctx).Model(&model.Cashier{}).Where("id = ?", id).Update("name", name)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

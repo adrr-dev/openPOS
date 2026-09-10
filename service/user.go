@@ -13,6 +13,7 @@ import (
 var (
 	ErrStoreMismatch = errors.New("akun tidak ditemukan di toko Anda")
 	ErrNotEditable   = errors.New("hanya akun kasir yang dapat dinonaktifkan")
+	ErrNotRenamable  = errors.New("hanya akun kasir yang dapat diubah")
 )
 
 type UserService struct {
@@ -93,4 +94,27 @@ func (s *UserService) Delete(ctx context.Context, storeID, targetID uint) error 
 		return ErrStoreMismatch
 	}
 	return s.cashiers.Delete(ctx, targetID)
+}
+
+func (s *UserService) Rename(ctx context.Context, storeID, targetID uint, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("Nama kasir wajib diisi.")
+	}
+	c, err := s.cashiers.GetByID(ctx, targetID)
+	if err == nil {
+		if c.StoreID != storeID {
+			return ErrStoreMismatch
+		}
+		return s.cashiers.UpdateName(ctx, targetID, name)
+	}
+	if !errors.Is(err, repo.ErrNotFound) {
+		return err
+	}
+	// Cashier not found: check if ID belongs to admin user in same store (ID collision case MEMORY.md §10)
+	u, uErr := s.users.GetByID(ctx, targetID)
+	if uErr == nil && u.StoreID == storeID {
+		return ErrNotRenamable
+	}
+	return ErrStoreMismatch
 }

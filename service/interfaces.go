@@ -28,6 +28,7 @@ type CashierRepository interface {
 	GetOrCreateByName(ctx context.Context, storeID uint, name string) (uint, error)
 	Delete(ctx context.Context, id uint) error
 	UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt *time.Time) error
+	UpdateName(ctx context.Context, id uint, name string) error
 }
 
 type RefreshRepository interface {

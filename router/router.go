@@ -141,6 +141,7 @@ func New(ctx context.Context) (*Server, error) {
 			{
 				adminGroup.GET("/users", userH.List)
 				adminGroup.POST("/users", userH.Create)
+				adminGroup.PATCH("/users/:id", userH.Rename)
 				adminGroup.PATCH("/users/:id/active", userH.SetActive)
 				adminGroup.DELETE("/users/:id", userH.Delete)
 				adminGroup.POST("/categories", catalogH.CreateCategory)
