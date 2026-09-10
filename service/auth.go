@@ -252,6 +252,39 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, code, newPasswor
 	return nil
 }
 
+func (s *AuthService) ChangePassword(ctx context.Context, claims *Claims, oldPassword, newPassword string) error {
+	if claims == nil {
+		return ErrTokenInvalid
+	}
+	if claims.ActingAsCashierID != nil {
+		return fmt.Errorf("kasir tidak memiliki kata sandi")
+	}
+	oldPassword = strings.TrimSpace(oldPassword)
+	newPassword = strings.TrimSpace(newPassword)
+	if len(newPassword) < 8 {
+		return fmt.Errorf("kata sandi minimal 8 karakter")
+	}
+	if oldPassword == "" {
+		return fmt.Errorf("kata sandi lama wajib diisi")
+	}
+	user, err := s.users.GetByID(ctx, claims.UserID)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)) != nil {
+		return ErrInvalidCredentials
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.users.UpdatePasswordByID(ctx, user.ID, string(hash)); err != nil {
+		return err
+	}
+	_ = s.refresh.RevokeAllForUser(ctx, user.ID)
+	return nil
+}
+
 func sendPasswordResetOTPEmail(toEmail, otpCode string) error {
 	host := getEnv("SMTP_HOST", "smtp.gmail.com")
 	port := getEnv("SMTP_PORT", "587")

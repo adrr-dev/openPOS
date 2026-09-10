@@ -29,9 +29,10 @@ Sebelum mengintegrasikan UI, harap perhatikan pedoman berikut agar integrasi ber
 Aplikasi ini mendukung perpindahan kasir cepat (common di mesin POS kasir fisik) menggunakan PIN/Passcode 5 digit.
 * **Alur Login / Switch Akun:**
   1. Jalankan request login/switch terlebih dahulu tanpa mengirimkan parameter `passcode`.
-  2. Jika akun dilindungi oleh passcode, server akan merespons dengan status `401 Unauthorized` dan body `{"error": "passcode_required"}`.
+  2. Jika akun dilindungi oleh passcode, server akan merespons dengan status `401 Unauthorized` dan body `{"error": "passcode_required", "code": "PASSCODE_REQUIRED"}` (field `code` untuk deteksi mesin).
   3. Ketika frontend menerima error tersebut, tampilkan modal/popup keypad PIN 5-digit ke layar.
   4. Pengguna memasukkan PIN, kemudian frontend mengulangi request dengan menyertakan atribut `passcode: "12345"`.
+* **Catatan keamanan:** `switch` ke admin wajib PIN — jika admin belum set PIN, `switch` akan `401 passcode_required` (tidak bisa `nil` bypass). `GoogleLogin` juga cek PIN bila akun target punya passcode. Rate limit login 5/menit/IP, switch 10/menit/user, forgot 3/menit/IP → `429`.
 
 ### 3. Presisi Perhitungan POS & Pajak (Tax)
 * **Snapshot Harga:** Backend selalu merekam snapshot `buy_price` dan `sell_price` saat transaksi terjadi. Nilai profit/laba rugi masa lalu tidak akan berubah meskipun harga produk diedit di masa depan.
@@ -46,6 +47,14 @@ Aplikasi ini mendukung perpindahan kasir cepat (common di mesin POS kasir fisik)
 
 ### 5. Cetak Struk POS (Receipt Printing)
 * Tarik konfigurasi cetak struk dari endpoint `/settings`. Perhatikan atribut `paper` (`58mm` atau `80mm`) untuk menyesuaikan layout CSS printing atau byte stream ESC/POS printer termal.
+* Backend **hanya** suplai JSON mentah `Trx` + `StoreSettings`; tidak render HTML/PDF — redesign struk tanpa frontend tetap pakai 2 call tersebut.
+
+### 6. Keamanan & Hardening
+* Rate limit: `login` 5/menit/IP, `switch` 10/menit/user, `forgot-password` 3/menit/IP → `429`.
+* `forgot-password/send` & `otp/send` generik `200` anti-enumerasi (`Jika email terdaftar...`).
+* Header API: `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options: DENY`, `CSP frame-ancestors 'none'`.
+* Akun nonaktif dicek per-request (`ActiveCheck`) — token langsung `401` walau belum expired.
+* `switch` ke admin wajib PIN; `GoogleLogin` juga cek PIN bila ada.
 
 ---
 
@@ -111,8 +120,8 @@ Memverifikasi 6 digit kode OTP yang dikirimkan ke email. Sukses menandai email t
   * `429 Too Many Requests` — `{"error": "Terlalu banyak percobaan. Kirim ulang kode OTP."}`
 
 #### `POST /auth/forgot-password/send`
-Mengirim kode OTP 6 digit ke email pengguna untuk proses pemulihan/lupa kata sandi (khusus akun non-Google).
-* **Autentikasi:** Publik (Tanpa token)
+Mengirim kode OTP 6 digit ke email pengguna untuk proses pemulihan/lupa kata sandi (khusus akun non-Google). Demi anti-enumerasi, respons selalu generik `200` meski email tidak ada.
+* **Autentikasi:** Publik (Tanpa token) — rate limit 3/menit/IP → `429`
 * **Request Expected:**
   ```json
   {
@@ -122,16 +131,15 @@ Mengirim kode OTP 6 digit ke email pengguna untuk proses pemulihan/lupa kata san
 * **Response Sukses (`200 OK`):**
   ```json
   {
-    "message": "Kode OTP pemulihan sandi terkirim ke email Anda."
+    "message": "Jika email terdaftar, kode OTP telah dikirim."
   }
   ```
 * **Expected Errors:**
   * `400 Bad Request` — `{"error": "Email tidak valid."}`
-  * `404 Not Found` — `{"error": "Akun dengan email tersebut tidak ditemukan."}`
-  * `429 Too Many Requests` — `{"error": "Terlalu sering meminta kode. Coba lagi dalam 60 detik."}`
+  * `429 Too Many Requests` — `{"error": "Terlalu sering meminta kode. Coba lagi dalam 60 detik."}` atau `{"error":"Terlalu banyak permintaan reset. Coba lagi dalam 1 menit."}`
 
 #### `POST /auth/forgot-password/reset`
-Memverifikasi kode OTP pemulihan dan memperbarui kata sandi akun dengan yang baru.
+Memverifikasi kode OTP pemulihan dan memperbarui kata sandi akun dengan yang baru. Sukses otomatis `RevokeAllForUser` — semua refresh token lama dicabut.
 * **Autentikasi:** Publik (Tanpa token)
 * **Request Expected:**
   ```json
@@ -194,21 +202,23 @@ Login/daftar instan dengan Google (GIS ID-token flow, alternatif dari OTP — ke
   ```json
   {
     "id_token": "eyJ...",
-    "storeName": "Toko Sembako Sari"
+    "storeName": "Toko Sembako Sari",
+    "passcode": "12345"
   }
   ```
-  *(Catatan: `id_token` didapat frontend dari tombol Google Identity Services. `storeName` opsional — hanya dipakai saat email belum terdaftar, untuk menamai toko baru; kosong memakai `"<nama>"'s Store`. Email yang sudah terdaftar (OTP maupun Google) otomatis terhubung ke akun yang sama; password lama tetap berfungsi.)*
+  *(Catatan: `id_token` didapat frontend dari tombol Google Identity Services. `storeName` opsional — hanya dipakai saat email belum terdaftar, untuk menamai toko baru; kosong memakai `"<nama>"'s Store`. Email yang sudah terdaftar (OTP maupun Google) otomatis terhubung ke akun yang sama; password lama tetap berfungsi. Jika akun target punya `passcode`, `passcode` wajib — tanpa itu `401 passcode_required`.)*
 * **Response Sukses (`200 OK`):** format response sama dengan `/auth/register`.
 * **Expected Errors:**
   * `400 Bad Request` — `{"error": "id_token wajib diisi"}`
   * `401 Unauthorized` — `{"error": "login Google tidak valid"}` (tanda tangan kedaluwarsa/salah, audience bukan milik aplikasi ini).
+  * `401 Unauthorized` — `{"error": "passcode_required", "code":"PASSCODE_REQUIRED"}` bila akun punya PIN.
   * `400 Bad Request` — Email Google belum diverifikasi.
   * `403 Forbidden` — Akun dinonaktifkan.
   * `500 Internal Server Error` — `GOOGLE_CLIENT_ID` belum diset di server.
 
 #### `POST /auth/login`
 Autentikasi masuk pengguna menggunakan email dan password.
-* **Autentikasi:** Publik (Tanpa token)
+* **Autentikasi:** Publik (Tanpa token) — rate limit 5/menit/IP → `429`
 * **Request Expected:**
   ```json
   {
@@ -220,13 +230,14 @@ Autentikasi masuk pengguna menggunakan email dan password.
   *(Catatan: Atribut `passcode` opsional, dikirim hanya jika server merespons dengan tantangan PIN)*
 * **Response Sukses (`200 OK`):** format response sama dengan `/auth/register`.
 * **Expected Errors:**
-  * `401 Unauthorized` — `{"error": "passcode_required"}` (Akun dilindungi passcode/PIN, minta input PIN 5 digit dari user).
+  * `401 Unauthorized` — `{"error": "passcode_required", "code":"PASSCODE_REQUIRED"}` (Akun dilindungi passcode/PIN, minta input PIN 5 digit dari user).
   * `401 Unauthorized` — `{"error": "Email atau kata sandi tidak cocok. Coba lagi."}`
-  * `401 Unauthorized` — `{"error": "Passcode salah. Coba lagi."}`
+  * `401 Unauthorized` — `{"error": "Passcode salah. Coba lagi.", "code":"PASSCODE_WRONG"}`
   * `403 Forbidden` — `{"error": "Akun dinonaktifkan. Hubungi admin toko."}`
+  * `429 Too Many Requests` — `{"error":"Terlalu banyak percobaan login. Coba lagi dalam 1 menit."}`
 
 #### `POST /auth/refresh`
-Melakukan rotasi/pembaruan Access Token yang telah kedaluwarsa menggunakan Refresh Token yang valid.
+Melakukan rotasi/pembaruan Access Token yang telah kedaluwarsa menggunakan Refresh Token yang valid. Konteks `acting_as` kasir dipertahankan lintas refresh.
 * **Autentikasi:** Publik (Tanpa token)
 * **Request Expected:**
   ```json
@@ -234,9 +245,9 @@ Melakukan rotasi/pembaruan Access Token yang telah kedaluwarsa menggunakan Refre
     "refresh_token": "88cb..."
   }
   ```
-* **Response Sukses (`200 OK`):** Mengembalikan pasangan token baru beserta profil pengguna (format sama dengan `/auth/register`).
+* **Response Sukses (`200 OK`):** Mengembalikan pasangan token baru beserta profil pengguna (format sama dengan `/auth/register`; `user.role` tetap `cashier` + `acting_as` bila sesi kasir).
 * **Expected Errors:**
-  * `401 Unauthorized` — `{"error": "sesi tidak valid, silakan masuk kembali"}`
+  * `401 Unauthorized` — `{"error": "sesi tidak valid, silakan masuk kembali"}` (termasuk kasir nonaktif / beda toko)
 
 #### `POST /auth/logout`
 Mencabut status aktif dari Refresh Token agar tidak bisa digunakan lagi di masa mendatang.
@@ -276,29 +287,49 @@ Mengambil profil data diri pengguna yang saat ini sedang aktif dalam sesi token.
 
 #### `POST /auth/switch`
 Beralih sesi aktif ke akun kasir/admin lain dalam toko yang sama secara instan (fast login switch).
-* **Autentikasi:** Bearer Token (Semua Role)
+* **Autentikasi:** Bearer Token (Semua Role) — rate limit 10/menit/user+IP → `429`; `switch` ke admin wajib PIN (bila admin belum set PIN → `401 passcode_required`).
 * **Request Expected:**
   ```json
   {
     "target_user_id": "b3e211da-e0c1-4b13-aa8d-8eb99a4e69bb",
-    "passcode": "54321"
+    "passcode": "54321",
+    "role": "admin"
   }
   ```
-  *(Catatan: Atribut `passcode` opsional, hanya wajib jika akun target dilindungi oleh passcode/PIN)*
+  *(Catatan: Atribut `passcode` opsional, hanya wajib jika akun target dilindungi oleh PIN; `role` opsional untuk disambiguasi `users` vs `cashiers` id tabrakan. Presence: user lama offline, target online.)*
 * **Response Sukses (`200 OK`):** Mengembalikan token pair baru untuk akun target (format sama dengan `/auth/register`).
 * **Expected Errors:**
   * `400 Bad Request` — `{"error": "Tidak dapat beralih ke akun sendiri."}`
-  * `401 Unauthorized` — `{"error": "passcode_required"}` (Akun target butuh PIN 5 digit).
-  * `401 Unauthorized` — `{"error": "Passcode salah. Coba lagi."}`
+  * `401 Unauthorized` — `{"error": "passcode_required", "code":"PASSCODE_REQUIRED"}` (Akun target butuh PIN 5 digit).
+  * `401 Unauthorized` — `{"error": "Passcode salah. Coba lagi.", "code":"PASSCODE_WRONG"}`
   * `403 Forbidden` — `{"error": "Akun dinonaktifkan."}`
   * `404 Not Found` — `{"error": "Akun tidak ditemukan."}`
+  * `429 Too Many Requests` — `{"error":"Terlalu banyak percobaan switch. Coba lagi dalam 1 menit."}`
+
+#### `PUT /auth/password`
+Ganti kata sandi saat login (terauntentikasi, bukan lupa PW).
+* **Autentikasi:** Bearer Token (Semua Role, kasir ditolak `403`)
+* **Request Expected:**
+  ```json
+  {
+    "old_password": "lamamin8",
+    "new_password": "baruminimal8karakter"
+  }
+  ```
+* **Response Sukses (`200 OK`):** `{"message":"Kata sandi berhasil diperbarui. Silakan masuk kembali."}` — semua refresh token lama dicabut (`RevokeAllForUser`), wajib login ulang.
+* **Expected Errors:** `400 kata sandi minimal 8 / lama wajib diisi`, `401 Kata sandi lama salah.`, `403 Kasir tidak memiliki kata sandi. Gunakan passcode.`, `401 sesi tidak valid`
+
+#### `POST /presence/heartbeat`
+Presence kasir Online/Offline. Frontend kirim tiap 30 dtk selagi login; `GET /users` hitung `online = last_seen_at <90s`.
+* **Auth:** Bearer (semua role) — tanpa body, `200 {"status":"ok"}`
+* **Efek:** `users.last_seen_at` & `cashiers.last_seen_at` diupdate; `logout`/`switch` set `NULL` offline instan.
 
 ---
 
 ### 👥 Manajemen Akun (User Management) 🔒 Admin
 
 #### `GET /users`
-Mendapatkan daftar seluruh akun staff/kasir yang terdaftar di dalam toko saat ini.
+Mendapatkan daftar seluruh akun staff/kasir yang terdaftar di dalam toko saat ini. Termasuk status presence `online` (`last_seen_at <90s`).
 * **Autentikasi:** Bearer Token (Hanya Admin)
 * **Response Sukses (`200 OK`):**
   ```json
@@ -310,6 +341,8 @@ Mendapatkan daftar seluruh akun staff/kasir yang terdaftar di dalam toko saat in
         "name": "Bu Sari",
         "role": "admin",
         "active": true,
+        "online": false,
+        "last_seen_at": "2026-09-10T08:12:00Z",
         "store_id": "df2a0752-6cfa-42f5-b6d4-83b632617a2d",
         "store_name": "Toko Sembako Sari",
         "created_at": "2026-08-25T08:15:00Z"
@@ -320,6 +353,8 @@ Mendapatkan daftar seluruh akun staff/kasir yang terdaftar di dalam toko saat in
         "name": "Andi Kasir",
         "role": "cashier",
         "active": true,
+        "online": true,
+        "last_seen_at": "2026-09-10T08:13:00Z",
         "store_id": "df2a0752-6cfa-42f5-b6d4-83b632617a2d",
         "store_name": "Toko Sembako Sari",
         "created_at": "2026-08-26T12:00:00Z"
@@ -354,6 +389,13 @@ Membuat akun staff kasir baru dalam toko. Kasir tidak memerlukan email atau pass
   ```
 * **Expected Errors:**
   * `409 Conflict` — `{"error": "Email sudah terdaftar."}`
+
+#### `PATCH /users/{id}`
+Ganti nama akun kasir dalam toko yang sama.
+* **Autentikasi:** Bearer Token (Hanya Admin)
+* **Request Expected:** `{"name":"Andi Kasir Baru"}`
+* **Response Sukses (`200 OK`):** `{"message":"Nama kasir diperbarui."}`
+* **Expected Errors:** `400 {"error":"Nama kasir wajib diisi."}`, `400 {"error":"Hanya akun kasir yang dapat diubah."}` (id milik admin), `404 {"error":"Akun tidak ditemukan di toko Anda."}`
 
 #### `PATCH /users/{id}/active`
 Mengubah status aktif (aktifkan atau nonaktifkan) akun kasir.
@@ -641,7 +683,7 @@ Mendapatkan riwayat mutasi keluar masuk stok di toko secara kronologis (terbaru 
 ### 🛒 Transaksi Penjualan (Transactions)
 
 #### `POST /transactions`
-Menyelesaikan proses transaksi penjualan POS belanja (Checkout). Stok barang otomatis dikurangi dan mutasi penjualan terekam secara real-time.
+Menyelesaikan proses transaksi penjualan POS belanja (Checkout). Stok barang otomatis dikurangi dan mutasi penjualan terekam secara real-time. **RBAC:** identitas kasir diambil dari JWT (`claims`), bukan payload; admin tanpa `switch` otomatis dibuatkan baris `cashiers` bernama admin (idempotent per toko).
 * **Autentikasi:** Bearer Token (Semua Role)
 * **Request Expected:**
   ```json
@@ -705,7 +747,7 @@ Mendapatkan daftar data riwayat transaksi penjualan.
   * `method` (string, opsional): Filter cara pembayaran (misal: `"QRIS"`).
   * `date` (string, opsional): Filter transaksi per tanggal format `YYYY-MM-DD`.
   * `page` (int, opsional): Halaman keberapa (default: `1`).
-  * `limit` (int, opsional): Batas item per halaman (default: `20`).
+  * `limit` (int, opsional): Batas item per halaman (default: `20`, **maksimum `200`** — clamp otomatis, echo `limit` yang di-clamp).
 * **Response Sukses (`200 OK`):**
   ```json
   {

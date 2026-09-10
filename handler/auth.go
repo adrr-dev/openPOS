@@ -71,6 +71,11 @@ type googleReq struct {
 	Passcode  string `json:"passcode,omitempty"`
 }
 
+type changePasswordReq struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
 type authResponse struct {
 	User model.PublicUser `json:"user"`
 	model.TokenPair
@@ -230,6 +235,28 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": pubUser})
+}
+
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	var req changePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
+		return
+	}
+	if err := h.auth.ChangePassword(c.Request.Context(), claims, req.OldPassword, req.NewPassword); err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Kata sandi lama salah."})
+			return
+		}
+		if err.Error() == "kasir tidak memiliki kata sandi" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Kasir tidak memiliki kata sandi. Gunakan passcode."})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Kata sandi berhasil diperbarui. Silakan masuk kembali."})
 }
 
 func (h *AuthHandler) Switch(c *gin.Context) {

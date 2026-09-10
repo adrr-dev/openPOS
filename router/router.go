@@ -117,6 +117,7 @@ func New(ctx context.Context) (*Server, error) {
 		{
 			authGroup.POST("/presence/heartbeat", presenceH.Heartbeat)
 			authGroup.GET("/auth/me", authH.Me)
+			authGroup.PUT("/auth/password", authH.ChangePassword)
 			authGroup.POST("/auth/switch", middleware.RateLimitSwitch(), authH.Switch)
 
 			authGroup.GET("/categories", catalogH.ListCategories)

@@ -16,6 +16,7 @@ type UserRepository interface {
 	SetPasscode(ctx context.Context, id uint, hash *string) error
 	RegisterTx(ctx context.Context, storeName, email, name, passwordHash string) (*model.User, error)
 	UpdatePassword(ctx context.Context, email string, passwordHash string) error
+	UpdatePasswordByID(ctx context.Context, id uint, passwordHash string) error
 	UpdateLastSeenAt(ctx context.Context, id uint, lastSeenAt *time.Time) error
 }
 
