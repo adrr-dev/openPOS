@@ -91,5 +91,6 @@ func Migrate(db *gorm.DB) error {
 		&model.Refund{},
 		&model.CashierShift{},
 		&model.Notification{},
+		&model.ActivityLog{},
 	)
 }

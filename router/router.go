@@ -55,23 +55,27 @@ func New(ctx context.Context) (*Server, error) {
 	reportRepo := repo.NewReportRepo(database)
 	shiftRepo := repo.NewShiftRepo(database)
 	notificationRepo := repo.NewNotificationRepo(database)
+	activityRepo := repo.NewActivityRepo(database)
 
 	authSvc := service.NewAuthService(userRepo, cashierRepo, refreshRepo, otpRepo, cfg.JWTSecret, cfg.AccessTTL, time.Duration(cfg.RefreshTTLDays)*24*time.Hour, cfg.GoogleClientID)
 	userSvc := service.NewUserService(userRepo, cashierRepo)
 	notificationSvc := service.NewNotificationService(notificationRepo)
+	activitySvc := service.NewActivityService(activityRepo)
+	authSvc.SetActivity(activitySvc)
 	catalogSvc := service.NewCatalogService(categoryRepo, productRepo, movementRepo, notificationSvc)
 	trxSvc := service.NewTrxService(trxRepo, cashierRepo, productRepo, notificationSvc)
 	settingsSvc := service.NewSettingsService(storeRepo, userRepo, cashierRepo, reportRepo)
 	shiftSvc := service.NewShiftService(shiftRepo, cashierRepo, storeRepo)
 
 	authH := handler.NewAuthHandler(authSvc)
-	userH := handler.NewUserHandler(userSvc)
+	userH := handler.NewUserHandler(userSvc, activitySvc)
 	catalogH := handler.NewCatalogHandler(catalogSvc)
 	stockH := handler.NewStockHandler(catalogSvc)
 	trxH := handler.NewTrxHandler(trxSvc)
-	settingsH := handler.NewSettingsHandler(settingsSvc)
+	settingsH := handler.NewSettingsHandler(settingsSvc, activitySvc)
 	shiftH := handler.NewShiftHandler(shiftSvc)
 	notificationH := handler.NewNotificationHandler(notificationSvc)
+	activityH := handler.NewActivityHandler(activitySvc)
 	presenceH := handler.NewPresenceHandler(authSvc)
 	healthH := handler.NewHealthHandler(database)
 
@@ -159,6 +163,7 @@ func New(ctx context.Context) (*Server, error) {
 				adminGroup.PUT("/users/:id/passcode", settingsH.SetPasscode)
 				adminGroup.GET("/reports", settingsH.Report)
 				adminGroup.GET("/shifts", shiftH.ListShifts)
+				adminGroup.GET("/activity", activityH.List)
 			}
 		}
 	}

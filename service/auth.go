@@ -57,6 +57,21 @@ type AuthService struct {
 	accessTTL      time.Duration
 	refreshTTL     time.Duration
 	googleClientID string
+	activity       *ActivityService
+}
+
+func (s *AuthService) SetActivity(a *ActivityService) {
+	s.activity = a
+}
+
+func (s *AuthService) logActivity(ctx context.Context, storeID uint, actorID, actorName, action, detail, refType, refID string) {
+	if s.activity == nil {
+		return
+	}
+	if len(detail) > 80 {
+		detail = detail[:80]
+	}
+	s.activity.Log(ctx, storeID, actorID, actorName, action, detail, refType, refID)
 }
 
 func NewAuthService(users UserRepository, cashiers CashierRepository, refresh RefreshRepository, otps OtpRepository, jwtSecret string, accessTTL time.Duration, refreshTTL time.Duration, googleClientID ...string) *AuthService {
@@ -436,6 +451,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password, store
 	now := time.Now().UTC()
 	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now)
 	user.LastSeenAt = &now
+	s.logActivity(ctx, user.StoreID, fmt.Sprintf("%d", user.ID), user.Name, ActivityLogin, fmt.Sprintf("%s login ke sistem", user.Name), "", "")
 	return user, pair, nil
 }
 
@@ -496,6 +512,7 @@ func (s *AuthService) Login(ctx context.Context, email, password, passcode, otp 
 	now2 := time.Now().UTC()
 	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now2)
 	user.LastSeenAt = &now2
+	s.logActivity(ctx, user.StoreID, fmt.Sprintf("%d", user.ID), user.Name, ActivityLogin, fmt.Sprintf("%s login ke sistem", user.Name), "", "")
 	return user, pair, nil
 }
 
@@ -541,6 +558,7 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName, passc
 		now := time.Now().UTC()
 		_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now)
 		user.LastSeenAt = &now
+		s.logActivity(ctx, user.StoreID, fmt.Sprintf("%d", user.ID), user.Name, ActivityLogin, fmt.Sprintf("%s login ke sistem", user.Name), "", "")
 		return user, pair, nil
 	} else if !errors.Is(err, repo.ErrNotFound) {
 		return nil, nil, err
@@ -567,6 +585,7 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken, storeName, passc
 	now2 := time.Now().UTC()
 	_ = s.users.UpdateLastSeenAt(ctx, user.ID, &now2)
 	user.LastSeenAt = &now2
+	s.logActivity(ctx, user.StoreID, fmt.Sprintf("%d", user.ID), user.Name, ActivityLogin, fmt.Sprintf("%s login ke sistem", user.Name), "", "")
 	return user, pair, nil
 }
 
@@ -661,14 +680,25 @@ func (s *AuthService) RecordHeartbeat(ctx context.Context, claims *Claims, now t
 }
 
 func (s *AuthService) Logout(ctx context.Context, refreshToken string, claims ...*Claims) {
+	logged := false
 	if refreshToken != "" {
 		hash := hashToken(refreshToken)
 		if rt, err := s.refresh.GetActiveByHash(ctx, hash); err == nil && !rt.Revoked && !time.Now().After(rt.ExpiresAt) {
 			// Tandai entity sesi yang benar offline (kasir vs owner).
 			if rt.ActingAsCashierID != nil {
 				_ = s.cashiers.UpdateLastSeenAt(ctx, *rt.ActingAsCashierID, nil)
+				if owner, err := s.users.GetByID(ctx, rt.UserID); err == nil {
+					if c, err := s.cashiers.GetByID(ctx, *rt.ActingAsCashierID); err == nil {
+						s.logActivity(ctx, owner.StoreID, fmt.Sprintf("%d", c.ID), c.Name, ActivityLogout, fmt.Sprintf("%s keluar dari sistem (kasir)", c.Name), "", "")
+						logged = true
+					}
+				}
 			} else {
 				_ = s.users.UpdateLastSeenAt(ctx, rt.UserID, nil)
+				if owner, err := s.users.GetByID(ctx, rt.UserID); err == nil {
+					s.logActivity(ctx, owner.StoreID, fmt.Sprintf("%d", owner.ID), owner.Name, ActivityLogout, fmt.Sprintf("%s keluar dari sistem", owner.Name), "", "")
+					logged = true
+				}
 			}
 		}
 		_ = s.refresh.Revoke(ctx, hash)
@@ -676,9 +706,31 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string, claims ..
 	// Fallback via Authorization header (frontend baru kirim header tanpa body) — gabungan dengan rt di atas.
 	if len(claims) > 0 && claims[0] != nil && claims[0].ActingAsCashierID != nil {
 		_ = s.cashiers.UpdateLastSeenAt(ctx, *claims[0].ActingAsCashierID, nil)
+		if !logged {
+			if owner, err := s.users.GetByID(ctx, claims[0].UserID); err == nil {
+				if c, err := s.cashiers.GetByID(ctx, *claims[0].ActingAsCashierID); err == nil {
+					s.logActivity(ctx, owner.StoreID, fmt.Sprintf("%d", c.ID), c.Name, ActivityLogout, fmt.Sprintf("%s keluar dari sistem (kasir)", c.Name), "", "")
+				}
+			}
+		}
 	} else if len(claims) > 0 && claims[0] != nil {
 		_ = s.users.UpdateLastSeenAt(ctx, claims[0].UserID, nil)
+		if !logged {
+			if owner, err := s.users.GetByID(ctx, claims[0].UserID); err == nil {
+				s.logActivity(ctx, owner.StoreID, fmt.Sprintf("%d", owner.ID), owner.Name, ActivityLogout, fmt.Sprintf("%s keluar dari sistem", owner.Name), "", "")
+			}
+		}
 	}
+}
+
+func (s *AuthService) switchSource(ctx context.Context, claims *Claims, owner *model.User) (actorID, actorName string) {
+	if claims.ActingAsCashierID != nil {
+		if c, err := s.cashiers.GetByID(ctx, *claims.ActingAsCashierID); err == nil {
+			return fmt.Sprintf("%d", c.ID), c.Name
+		}
+		return fmt.Sprintf("%d", *claims.ActingAsCashierID), claims.Name
+	}
+	return fmt.Sprintf("%d", owner.ID), owner.Name
 }
 
 func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint, passcode string, roleHint ...string) (*model.PublicUser, *model.TokenPair, error) {
@@ -701,6 +753,8 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		}
 	}
 
+	srcID, srcName := s.switchSource(ctx, claims, owner)
+
 	if hint == "cashier" {
 		if claims.ActingAsCashierID != nil && targetID == *claims.ActingAsCashierID {
 			return nil, nil, ErrSwitchSelf
@@ -720,6 +774,7 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 			_ = s.cashiers.UpdateLastSeenAt(ctx, c.ID, &now)
 			c.LastSeenAt = &now
 			pub := c.Public(owner.StoreName)
+			s.logActivity(ctx, owner.StoreID, srcID, srcName, ActivitySwitch, fmt.Sprintf("%s beralih ke %s (kasir)", srcName, c.Name), "user", fmt.Sprintf("%d", c.ID))
 			return &pub, pair, nil
 		}
 		return nil, nil, repo.ErrNotFound
@@ -740,6 +795,7 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		_ = s.users.UpdateLastSeenAt(ctx, owner.ID, &now)
 		owner.LastSeenAt = &now
 		pub := owner.Public()
+		s.logActivity(ctx, owner.StoreID, srcID, srcName, ActivitySwitch, fmt.Sprintf("%s beralih ke %s (admin)", srcName, owner.Name), "user", fmt.Sprintf("%d", owner.ID))
 		return &pub, pair, nil
 	}
 
@@ -762,6 +818,7 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		_ = s.cashiers.UpdateLastSeenAt(ctx, c.ID, &now)
 		c.LastSeenAt = &now
 		pub := c.Public(owner.StoreName)
+		s.logActivity(ctx, owner.StoreID, srcID, srcName, ActivitySwitch, fmt.Sprintf("%s beralih ke %s (kasir)", srcName, c.Name), "user", fmt.Sprintf("%d", c.ID))
 		return &pub, pair, nil
 	}
 
@@ -780,6 +837,7 @@ func (s *AuthService) Switch(ctx context.Context, claims *Claims, targetID uint,
 		_ = s.users.UpdateLastSeenAt(ctx, owner.ID, &now)
 		owner.LastSeenAt = &now
 		pub := owner.Public()
+		s.logActivity(ctx, owner.StoreID, srcID, srcName, ActivitySwitch, fmt.Sprintf("%s beralih ke %s (admin)", srcName, owner.Name), "user", fmt.Sprintf("%d", owner.ID))
 		return &pub, pair, nil
 	}
 

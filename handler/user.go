@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,11 +12,32 @@ import (
 	"github.com/adrr-dev/openPOS/backend/service"
 )
 
-type UserHandler struct {
-	svc *service.UserService
+func formatID(id uint) string {
+	return fmt.Sprintf("%d", id)
 }
 
-func NewUserHandler(svc *service.UserService) *UserHandler { return &UserHandler{svc: svc} }
+type UserHandler struct {
+	svc      *service.UserService
+	activity *service.ActivityService
+}
+
+func NewUserHandler(svc *service.UserService, activity ...*service.ActivityService) *UserHandler {
+	h := &UserHandler{svc: svc}
+	if len(activity) > 0 {
+		h.activity = activity[0]
+	}
+	return h
+}
+
+func (h *UserHandler) logActivity(ctx context.Context, storeID uint, actorID, actorName, action, detail, refType, refID string) {
+	if h.activity == nil {
+		return
+	}
+	if len(detail) > 80 {
+		detail = detail[:80]
+	}
+	h.activity.Log(ctx, storeID, actorID, actorName, action, detail, refType, refID)
+}
 
 type createUserReq struct {
 	Name string `json:"name"`
@@ -50,6 +73,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		respondUserErr(c, err)
 		return
 	}
+	h.logActivity(c.Request.Context(), claims.StoreID, formatID(claims.UserID), claims.Name, service.ActivityUserCreated, fmt.Sprintf("%s ditambahkan sebagai kasir", user.Name), "user", formatID(user.ID))
 	c.JSON(http.StatusCreated, gin.H{"user": user})
 }
 
@@ -64,14 +88,29 @@ func (h *UserHandler) SetActive(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
+	// Resolve target name for activity detail (best-effort).
+	targetName := fmt.Sprintf("Akun %d", id)
+	if users, err := h.svc.List(c.Request.Context(), claims.StoreID); err == nil {
+		for _, u := range users {
+			if u.ID == id {
+				targetName = u.Name
+				break
+			}
+		}
+	}
 	if err := h.svc.SetActive(c.Request.Context(), claims.StoreID, id, req.Active); err != nil {
 		respondUserErr(c, err)
 		return
 	}
 	msg := "Akun diaktifkan."
+	action := service.ActivityAccountEnabled
+	detail := fmt.Sprintf("%s diaktifkan kembali", targetName)
 	if !req.Active {
 		msg = "Akun dinonaktifkan."
+		action = service.ActivityAccountDisabled
+		detail = fmt.Sprintf("%s dinonaktifkan", targetName)
 	}
+	h.logActivity(c.Request.Context(), claims.StoreID, formatID(claims.UserID), claims.Name, action, detail, "user", formatID(id))
 	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
@@ -103,6 +142,7 @@ func (h *UserHandler) Rename(c *gin.Context) {
 		respondUserErr(c, err)
 		return
 	}
+	h.logActivity(c.Request.Context(), claims.StoreID, formatID(claims.UserID), claims.Name, service.ActivityProfileUpdated, fmt.Sprintf("%s memperbarui profil", req.Name), "user", formatID(id))
 	c.JSON(http.StatusOK, gin.H{"message": "Nama kasir diperbarui."})
 }
 

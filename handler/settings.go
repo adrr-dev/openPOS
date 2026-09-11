@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,11 +15,26 @@ import (
 )
 
 type SettingsHandler struct {
-	svc *service.SettingsService
+	svc      *service.SettingsService
+	activity *service.ActivityService
 }
 
-func NewSettingsHandler(svc *service.SettingsService) *SettingsHandler {
-	return &SettingsHandler{svc: svc}
+func NewSettingsHandler(svc *service.SettingsService, activity ...*service.ActivityService) *SettingsHandler {
+	h := &SettingsHandler{svc: svc}
+	if len(activity) > 0 {
+		h.activity = activity[0]
+	}
+	return h
+}
+
+func (h *SettingsHandler) logActivity(ctx context.Context, storeID uint, actorID, actorName, action, detail, refType, refID string) {
+	if h.activity == nil {
+		return
+	}
+	if len(detail) > 80 {
+		detail = detail[:80]
+	}
+	h.activity.Log(ctx, storeID, actorID, actorName, action, detail, refType, refID)
 }
 
 func (h *SettingsHandler) Get(c *gin.Context) {
@@ -65,6 +82,7 @@ func (h *SettingsHandler) Update(c *gin.Context) {
 		}
 		return
 	}
+	h.logActivity(c.Request.Context(), claims.StoreID, formatID(claims.UserID), claims.Name, service.ActivityProfileUpdated, fmt.Sprintf("%s memperbarui profil", claims.Name), "", "")
 	c.JSON(http.StatusOK, s)
 }
 
@@ -99,6 +117,7 @@ func (h *SettingsHandler) SetPasscode(c *gin.Context) {
 	if req.Passcode == "" {
 		msg = "Passcode dihapus."
 	}
+	h.logActivity(c.Request.Context(), claims.StoreID, formatID(claims.UserID), claims.Name, service.ActivityPasscodeChanged, fmt.Sprintf("Passcode akun %d diperbarui", id), "user", formatID(id))
 	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
