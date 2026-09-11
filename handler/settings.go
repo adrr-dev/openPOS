@@ -48,15 +48,31 @@ func (h *SettingsHandler) Get(c *gin.Context) {
 }
 
 type settingsReq struct {
-	Name          string  `json:"storeName"`
-	Address       string  `json:"address"`
-	Phone         string  `json:"phone"`
-	TaxEnabled    bool    `json:"taxEnabled"`
-	TaxPct        float64 `json:"taxPct"`
-	ReceiptHeader string  `json:"receiptHeader"`
-	ReceiptFooter string  `json:"receiptFooter"`
-	Paper         string  `json:"paper"`
-	Timezone      string  `json:"timezone"`
+	Name                *string             `json:"storeName"`
+	Address             *string             `json:"address"`
+	Phone               *string             `json:"phone"`
+	TaxEnabled          *bool               `json:"taxEnabled"`
+	TaxPct              *float64            `json:"taxPct"`
+	ReceiptHeader       *string             `json:"receiptHeader"`
+	ReceiptFooter       *string             `json:"receiptFooter"`
+	Paper               *string             `json:"paper"`
+	Timezone            *string             `json:"timezone"`
+	BusinessType        *string             `json:"businessType"`
+	Email               *string             `json:"email"`
+	City                *string             `json:"city"`
+	Province            *string             `json:"province"`
+	Currency            *string             `json:"currency"`
+	Hours               *[]model.StoreHours `json:"hours"`
+	ReceiptShowLogo     *bool               `json:"receiptShowLogo"`
+	ReceiptShowCashier  *bool               `json:"receiptShowCashier"`
+	ReceiptShowMethod   *bool               `json:"receiptShowMethod"`
+	ReceiptShowTax      *bool               `json:"receiptShowTax"`
+	ReceiptShowDiscount *bool               `json:"receiptShowDiscount"`
+	ReceiptShowNote     *bool               `json:"receiptShowNote"`
+	TaxName             *string             `json:"taxName"`
+	TaxInclusive        *bool               `json:"taxInclusive"`
+	TaxRounding         *string             `json:"taxRounding"`
+	TaxApplyTo          *string             `json:"taxApplyTo"`
 }
 
 func (h *SettingsHandler) Update(c *gin.Context) {
@@ -66,17 +82,68 @@ func (h *SettingsHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "body JSON tidak valid"})
 		return
 	}
-	in := &model.StoreSettings{
-		Name: req.Name, Address: req.Address, Phone: req.Phone,
-		TaxEnabled: req.TaxEnabled, TaxPct: req.TaxPct,
-		ReceiptHeader: req.ReceiptHeader, ReceiptFooter: req.ReceiptFooter,
-		Paper: req.Paper, Timezone: req.Timezone,
+	// Merge-semantics: key yang absen = tidak diubah (body parsial tetap valid,
+	// field tak dikenal otomatis diabaikan oleh binding).
+	cur, err := h.svc.Get(c.Request.Context(), claims.StoreID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memuat pengaturan."})
+		return
 	}
+	in := cur
+	applyStr := func(dst *string, v *string) {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	applyBool := func(dst *bool, v *bool) {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	applyStr(&in.Name, req.Name)
+	applyStr(&in.Address, req.Address)
+	applyStr(&in.Phone, req.Phone)
+	applyBool(&in.TaxEnabled, req.TaxEnabled)
+	if req.TaxPct != nil {
+		in.TaxPct = *req.TaxPct
+	}
+	applyStr(&in.ReceiptHeader, req.ReceiptHeader)
+	applyStr(&in.ReceiptFooter, req.ReceiptFooter)
+	applyStr(&in.Paper, req.Paper)
+	applyStr(&in.Timezone, req.Timezone)
+	applyStr(&in.BusinessType, req.BusinessType)
+	applyStr(&in.Email, req.Email)
+	applyStr(&in.City, req.City)
+	applyStr(&in.Province, req.Province)
+	applyStr(&in.Currency, req.Currency)
+	if req.Hours != nil {
+		in.Hours = *req.Hours
+	}
+	applyBool(&in.ReceiptShowLogo, req.ReceiptShowLogo)
+	applyBool(&in.ReceiptShowCashier, req.ReceiptShowCashier)
+	applyBool(&in.ReceiptShowMethod, req.ReceiptShowMethod)
+	applyBool(&in.ReceiptShowTax, req.ReceiptShowTax)
+	applyBool(&in.ReceiptShowDiscount, req.ReceiptShowDiscount)
+	applyBool(&in.ReceiptShowNote, req.ReceiptShowNote)
+	applyStr(&in.TaxName, req.TaxName)
+	applyBool(&in.TaxInclusive, req.TaxInclusive)
+	applyStr(&in.TaxRounding, req.TaxRounding)
+	applyStr(&in.TaxApplyTo, req.TaxApplyTo)
 	s, err := h.svc.Update(c.Request.Context(), claims.StoreID, in)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrBadTimezone):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Zona waktu tidak valid."})
+		case errors.Is(err, service.ErrBadBusinessType),
+			errors.Is(err, service.ErrBadStoreEmail),
+			errors.Is(err, service.ErrBadCurrency),
+			errors.Is(err, service.ErrBadHours),
+			errors.Is(err, service.ErrBadReceiptFooter),
+			errors.Is(err, service.ErrBadTaxName),
+			errors.Is(err, service.ErrBadTaxPct),
+			errors.Is(err, service.ErrBadTaxRounding),
+			errors.Is(err, service.ErrBadTaxApplyTo):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -133,10 +134,18 @@ func (r *TrxRepo) Checkout(ctx context.Context, in CheckoutInput) (*model.Trx, e
 		}
 
 		var tax int64
+		base := subtotal - discount
+		total := base
 		if store.TaxEnabled && store.TaxPct > 0 {
-			tax = roundHalfUp(float64(subtotal-discount) * store.TaxPct / 100)
+			if store.TaxInclusive {
+				// Harga sudah termasuk pajak: total tetap = base,
+				// tax = base - base/(1+pct/100).
+				tax = applyTaxRounding(float64(base)-float64(base)/(1+store.TaxPct/100), store.TaxRounding)
+			} else {
+				tax = applyTaxRounding(float64(base)*store.TaxPct/100, store.TaxRounding)
+				total = base + tax
+			}
 		}
-		total := subtotal - discount + tax
 
 		paid, change := in.Paid, int64(0)
 		if in.Method == string(model.PayCash) {
@@ -452,4 +461,17 @@ func (r *TrxRepo) GetByID(ctx context.Context, storeID, id uint) (*model.Trx, er
 
 func roundHalfUp(f float64) int64 {
 	return int64(f + 0.5)
+}
+
+// applyTaxRounding menerapkan mode pembulatan pajak: none = round_half_up
+// (perilaku lama), down = floor, up = ceil.
+func applyTaxRounding(f float64, mode string) int64 {
+	switch mode {
+	case "down":
+		return int64(math.Floor(f))
+	case "up":
+		return int64(math.Ceil(f))
+	default:
+		return roundHalfUp(f)
+	}
 }

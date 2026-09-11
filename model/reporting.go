@@ -2,16 +2,38 @@ package model
 
 import "time"
 
+type StoreHours struct {
+	Days  string  `json:"days"`
+	Open  *string `json:"open"`
+	Close *string `json:"close"`
+}
+
 type StoreSettings struct {
-	Name          string  `json:"storeName"`
-	Address       string  `json:"address"`
-	Phone         string  `json:"phone"`
-	TaxEnabled    bool    `json:"taxEnabled"`
-	TaxPct        float64 `json:"taxPct"`
-	ReceiptHeader string  `json:"receiptHeader"`
-	ReceiptFooter string  `json:"receiptFooter"`
-	Paper         string  `json:"paper"`
-	Timezone      string  `json:"timezone"`
+	Name                string       `json:"storeName"`
+	Address             string       `json:"address"`
+	Phone               string       `json:"phone"`
+	TaxEnabled          bool         `json:"taxEnabled"`
+	TaxPct              float64      `json:"taxPct"`
+	ReceiptHeader       string       `json:"receiptHeader"`
+	ReceiptFooter       string       `json:"receiptFooter"`
+	Paper               string       `json:"paper"`
+	Timezone            string       `json:"timezone"`
+	BusinessType        string       `json:"businessType"`
+	Email               string       `json:"email"`
+	City                string       `json:"city"`
+	Province            string       `json:"province"`
+	Currency            string       `json:"currency"`
+	Hours               []StoreHours `json:"hours"`
+	ReceiptShowLogo     bool         `json:"receiptShowLogo"`
+	ReceiptShowCashier  bool         `json:"receiptShowCashier"`
+	ReceiptShowMethod   bool         `json:"receiptShowMethod"`
+	ReceiptShowTax      bool         `json:"receiptShowTax"`
+	ReceiptShowDiscount bool         `json:"receiptShowDiscount"`
+	ReceiptShowNote     bool         `json:"receiptShowNote"`
+	TaxName             string       `json:"taxName"`
+	TaxInclusive        bool         `json:"taxInclusive"`
+	TaxRounding         string       `json:"taxRounding"`
+	TaxApplyTo          string       `json:"taxApplyTo"`
 }
 
 type DayPoint struct {

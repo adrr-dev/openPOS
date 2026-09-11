@@ -35,6 +35,23 @@ type Store struct {
 	ReceiptFooter string  `gorm:"not null;default:'Barang yang sudah dibeli tidak dapat ditukar'" json:"receiptFooter"`
 	Paper         string  `gorm:"not null;default:'58mm'" json:"paper"`
 	Timezone      string  `gorm:"not null;default:'Asia/Makassar'" json:"timezone"`
+	// Extended settings (kontrak Extended Store Settings).
+	BusinessType        string `gorm:"not null;default:''" json:"businessType"`
+	Email               string `gorm:"not null;default:''" json:"email"`
+	City                string `gorm:"not null;default:''" json:"city"`
+	Province            string `gorm:"not null;default:''" json:"province"`
+	Currency            string `gorm:"not null;default:'IDR'" json:"currency"`
+	Hours               string `gorm:"not null;default:'[]'" json:"hours"`
+	ReceiptShowLogo     bool   `gorm:"not null;default:true" json:"receiptShowLogo"`
+	ReceiptShowCashier  bool   `gorm:"not null;default:true" json:"receiptShowCashier"`
+	ReceiptShowMethod   bool   `gorm:"not null;default:true" json:"receiptShowMethod"`
+	ReceiptShowTax      bool   `gorm:"not null;default:true" json:"receiptShowTax"`
+	ReceiptShowDiscount bool   `gorm:"not null;default:true" json:"receiptShowDiscount"`
+	ReceiptShowNote     bool   `gorm:"not null;default:true" json:"receiptShowNote"`
+	TaxName             string `gorm:"not null;default:''" json:"taxName"`
+	TaxInclusive        bool   `gorm:"not null;default:false" json:"taxInclusive"`
+	TaxRounding         string `gorm:"not null;default:'none'" json:"taxRounding"`
+	TaxApplyTo          string `gorm:"not null;default:'all'" json:"taxApplyTo"`
 }
 
 func (Store) TableName() string {
@@ -49,10 +66,10 @@ type User struct {
 	PasswordHash    string     `gorm:"not null" json:"-"`
 	PasscodeHash    *string    `json:"-"`
 	Role            Role       `gorm:"not null;default:'cashier'" json:"role"`
-	Active          bool        `gorm:"not null;default:true" json:"active"`
-	LastSeenAt      *time.Time  `gorm:"index" json:"last_seen_at,omitempty"`
-	EmailVerifiedAt *time.Time  `json:"email_verified_at,omitempty"`
-	StoreName       string      `gorm:"-" json:"store_name,omitempty"`
+	Active          bool       `gorm:"not null;default:true" json:"active"`
+	LastSeenAt      *time.Time `gorm:"index" json:"last_seen_at,omitempty"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+	StoreName       string     `gorm:"-" json:"store_name,omitempty"`
 }
 
 func (User) TableName() string {
@@ -78,32 +95,32 @@ func (c *Cashier) Public(storeName string) PublicUser {
 		online = time.Since(*c.LastSeenAt) < 90*time.Second
 	}
 	return PublicUser{
-		ID:           c.ID,
-		Email:        "",
-		Name:         c.Name,
-		Role:         RoleCashier,
-		Active:       c.Active,
-		Online:       online,
-		LastSeenAt:   c.LastSeenAt,
-		StoreID:      c.StoreID,
-		StoreName:    storeName,
-		CreatedAt:    c.CreatedAt,
-		HasPasscode:  c.PasscodeHash != nil && *c.PasscodeHash != "",
+		ID:          c.ID,
+		Email:       "",
+		Name:        c.Name,
+		Role:        RoleCashier,
+		Active:      c.Active,
+		Online:      online,
+		LastSeenAt:  c.LastSeenAt,
+		StoreID:     c.StoreID,
+		StoreName:   storeName,
+		CreatedAt:   c.CreatedAt,
+		HasPasscode: c.PasscodeHash != nil && *c.PasscodeHash != "",
 	}
 }
 
 type PublicUser struct {
-	ID          uint      `json:"id"`
-	Email       string    `json:"email"`
-	Name        string    `json:"name"`
-	Role        Role      `json:"role"`
-	Active      bool      `json:"active"`
-	Online      bool      `json:"online"`
+	ID          uint       `json:"id"`
+	Email       string     `json:"email"`
+	Name        string     `json:"name"`
+	Role        Role       `json:"role"`
+	Active      bool       `json:"active"`
+	Online      bool       `json:"online"`
 	LastSeenAt  *time.Time `json:"last_seen_at,omitempty"`
-	StoreID     uint      `json:"store_id"`
-	StoreName   string    `json:"store_name,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	HasPasscode bool      `json:"has_passcode"`
+	StoreID     uint       `json:"store_id"`
+	StoreName   string     `json:"store_name,omitempty"`
+	CreatedAt   time.Time  `json:"created_at,omitempty"`
+	HasPasscode bool       `json:"has_passcode"`
 }
 
 func (u *User) Public() PublicUser {

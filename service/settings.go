@@ -45,7 +45,102 @@ func (s *SettingsService) Update(ctx context.Context, storeID uint, in *model.St
 	if in.TaxPct < 0 {
 		in.TaxPct = 0
 	}
+	if in.TaxPct > 100 {
+		return nil, ErrBadTaxPct
+	}
+	if err := validateExtendedSettings(in); err != nil {
+		return nil, err
+	}
 	return s.stores.UpdateSettings(ctx, storeID, in)
+}
+
+var validBusinessTypes = map[string]bool{
+	"": true, "retail": true, "fnb": true, "fashion": true, "jasa": true, "lainnya": true,
+}
+
+// Label days jam operasional (grup tampilan frontend) — tepat 3 entri.
+var validHoursDays = []string{"Senin – Jumat", "Sabtu", "Minggu"}
+
+func validateExtendedSettings(in *model.StoreSettings) error {
+	in.BusinessType = strings.TrimSpace(in.BusinessType)
+	if !validBusinessTypes[in.BusinessType] {
+		return ErrBadBusinessType
+	}
+	in.Email = strings.TrimSpace(in.Email)
+	if in.Email != "" && !isEmail(in.Email) {
+		return ErrBadStoreEmail
+	}
+	in.City = strings.TrimSpace(in.City)
+	in.Province = strings.TrimSpace(in.Province)
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
+	if in.Currency == "" {
+		in.Currency = "IDR"
+	}
+	if len(in.Currency) != 3 {
+		return ErrBadCurrency
+	}
+	for _, ch := range in.Currency {
+		if ch < 'A' || ch > 'Z' {
+			return ErrBadCurrency
+		}
+	}
+	if in.Hours == nil {
+		in.Hours = []model.StoreHours{}
+	}
+	if len(in.Hours) != 0 && len(in.Hours) != 3 {
+		return ErrBadHours
+	}
+	for i, h := range in.Hours {
+		if h.Days != validHoursDays[i] {
+			return ErrBadHours
+		}
+		if h.Open == nil && h.Close == nil {
+			continue
+		}
+		if h.Open == nil || h.Close == nil {
+			return ErrBadHours
+		}
+		open, close := strings.TrimSpace(*h.Open), strings.TrimSpace(*h.Close)
+		if !validHourMinute(open) || !validHourMinute(close) || open >= close {
+			return ErrBadHours
+		}
+		in.Hours[i].Open, in.Hours[i].Close = &open, &close
+	}
+	if len(in.ReceiptFooter) > 200 {
+		return ErrBadReceiptFooter
+	}
+	if len(in.TaxName) > 20 {
+		return ErrBadTaxName
+	}
+	in.TaxName = strings.TrimSpace(in.TaxName)
+	switch in.TaxRounding {
+	case "", "none":
+		in.TaxRounding = "none"
+	case "down", "up":
+	default:
+		return ErrBadTaxRounding
+	}
+	if in.TaxApplyTo == "" {
+		in.TaxApplyTo = "all"
+	}
+	if in.TaxApplyTo != "all" {
+		return ErrBadTaxApplyTo
+	}
+	return nil
+}
+
+func validHourMinute(s string) bool {
+	if len(s) != 5 || s[2] != ':' {
+		return false
+	}
+	for _, idx := range []int{0, 1, 3, 4} {
+		if s[idx] < '0' || s[idx] > '9' {
+			return false
+		}
+	}
+	hh := int(s[0]-'0')*10 + int(s[1]-'0')
+	mm := int(s[3]-'0')*10 + int(s[4]-'0')
+	return hh < 24 && mm < 60
 }
 
 // SetPasscode sets the 5-digit PIN for an owner or cashier. roleHint comes
@@ -98,8 +193,17 @@ func (s *SettingsService) Dashboard(ctx context.Context, storeID, cashierID uint
 }
 
 var (
-	ErrBadTimezone = fmt.Errorf("zona waktu tidak valid")
-	ErrBadPeriod   = errors.New("periode tidak valid")
+	ErrBadTimezone      = fmt.Errorf("zona waktu tidak valid")
+	ErrBadPeriod        = errors.New("periode tidak valid")
+	ErrBadBusinessType  = errors.New("Jenis usaha tidak valid.")
+	ErrBadStoreEmail    = errors.New("Email tidak valid.")
+	ErrBadCurrency      = errors.New("Kode mata uang tidak valid.")
+	ErrBadHours         = errors.New("Jam operasional tidak valid.")
+	ErrBadReceiptFooter = errors.New("Pesan footer maksimal 200 karakter.")
+	ErrBadTaxName       = errors.New("Nama pajak maksimal 20 karakter.")
+	ErrBadTaxPct        = errors.New("Tarif pajak maksimal 100 persen.")
+	ErrBadTaxRounding   = errors.New("Pembulatan pajak tidak valid.")
+	ErrBadTaxApplyTo    = errors.New("Cakupan pajak tidak valid.")
 )
 
 var validPeriods = map[string]bool{"": true, "today": true, "yesterday": true, "week": true, "month": true, "all": true}
