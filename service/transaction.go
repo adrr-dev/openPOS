@@ -35,24 +35,14 @@ type CheckoutItemCmd struct {
 func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string, cmd CheckoutCmd) (*model.Trx, error) {
 	// RBAC: transaksi selalu pakai identitas dari JWT (claims), bukan dari payload.
 	// fallbackName = claims.Name (JWT), actingAsCashierID = claims.ActingAsCashierID.
-	// Jika admin tidak switch (actingAs==nil), buat/ambil baris cashiers bernama admin
-	// sebagai pemilik transaksi agar admin tetap bisa checkout tanpa dianggap Kasir lain
-	// (idempotent per store_id+name via GetOrCreateByName). Tidak pernah buat users/KASIR.
+	// Admin tanpa switch mencatat transaksi atas namanya sendiri (cashier_id=0),
+	// TANPA membuat baris cashiers kloningan. Kasir (actingAs) tetap memakai
+	// baris cashiers miliknya agar scope data kasir bekerja.
 	var cashierID uint
 	cashierName := fallbackName
 
 	if actingAsCashierID != nil {
 		cashierID = *actingAsCashierID
-		c, err := s.cashiers.GetByID(ctx, cashierID)
-		if err == nil {
-			cashierName = c.Name
-		}
-	} else {
-		defID, err := s.cashiers.GetOrCreateByName(ctx, storeID, fallbackName)
-		if err != nil {
-			return nil, err
-		}
-		cashierID = defID
 		c, err := s.cashiers.GetByID(ctx, cashierID)
 		if err == nil {
 			cashierName = c.Name
@@ -69,7 +59,10 @@ func (s *TrxService) Checkout(ctx context.Context, storeID uint, actingAsCashier
 		Paid: cmd.Paid, Customer: cmd.Customer,
 	})
 	if err == nil && s.notif != nil {
-		actorIDStr := fmt.Sprintf("%d", cashierID)
+		actorIDStr := ""
+		if cashierID != 0 {
+			actorIDStr = fmt.Sprintf("%d", cashierID)
+		}
 		refIDStr := fmt.Sprintf("%d", resTrx.ID)
 		title := "Transaksi baru"
 		message := fmt.Sprintf("Rp%d · %s", resTrx.Total, resTrx.Method)

@@ -22,27 +22,16 @@ func NewShiftService(shifts ShiftRepository, cashiers CashierRepository, stores 
 }
 
 func (s *ShiftService) resolveCashier(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string) (uint, string, error) {
-	var cashierID uint
+	// Admin tanpa switch memakai cashier_id=0 (shift admin sendiri),
+	// TANPA membuat baris cashiers kloningan. Kasir memakai id-nya.
 	cashierName := fallbackName
-
 	if actingAsCashierID != nil {
-		cashierID = *actingAsCashierID
-		c, err := s.cashiers.GetByID(ctx, cashierID)
-		if err == nil {
+		if c, err := s.cashiers.GetByID(ctx, *actingAsCashierID); err == nil {
 			cashierName = c.Name
 		}
-	} else {
-		defID, err := s.cashiers.GetOrCreateByName(ctx, storeID, fallbackName)
-		if err != nil {
-			return 0, "", err
-		}
-		cashierID = defID
-		c, err := s.cashiers.GetByID(ctx, cashierID)
-		if err == nil {
-			cashierName = c.Name
-		}
+		return *actingAsCashierID, cashierName, nil
 	}
-	return cashierID, cashierName, nil
+	return 0, cashierName, nil
 }
 
 func (s *ShiftService) GetCashierShift(ctx context.Context, storeID uint, actingAsCashierID *uint, fallbackName string) (any, error) {

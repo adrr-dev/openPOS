@@ -415,8 +415,8 @@ func TestAllEndpoints(t *testing.T) {
 	}
 	w, resp = doReq("GET", "/transactions", nil, kTok)
 	expect("list trx cashier -> 200", w, 200)
-	// Admin checkouts without acting-as now attach to the admin's own cashier record
-	// via GetOrCreateByName, so admin checkouts do not leak into Kasir1 -> total 1.
+	// Admin checkouts without acting-as are recorded as the admin (cashier_id=0),
+	// so admin checkouts do not leak into Kasir1 -> total 1.
 	if int(resp["total"].(float64)) != 1 {
 		t.Fatalf("trx cashier list: %v", resp)
 	}
